@@ -7,6 +7,11 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:ci": "ng test --watch=false",
+    "lint": "ng lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky",
     "serve:ssr:h20-event-assistant": "node dist/h20-event-assistant/server/server.mjs"
   },
   "private": true,
