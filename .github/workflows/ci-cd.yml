@@ -83,7 +83,7 @@ jobs:
 
     - name: Deploy to Firebase Dev
       run: npx firebase-tools@15.28.1 deploy --only hosting --project h20-event-assistant-dev
-      
+
   deploy-prod:
   needs:
     - code-quality
