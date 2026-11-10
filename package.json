@@ -7,6 +7,11 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:ci": "ng test --watch=false",
+    "lint": "ng lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky",
     "serve:ssr:h20-event-assistant": "node dist/h20-event-assistant/server/server.mjs"
   },
   "private": true,
@@ -28,11 +33,16 @@
     "@angular/build": "^22.2.6",
     "@angular/cli": "^22.2.6",
     "@angular/compiler-cli": "^22.2.0",
+    "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.1",
     "@types/node": "^22.12.0",
+    "angular-eslint": "22.6.0",
+    "eslint": "^10.12.0",
+    "husky": "^9.1.7",
     "jsdom": "^30.0.0",
     "prettier": "^3.8.1",
     "typescript": "~6.0.2",
+    "typescript-eslint": "8.71.0",
     "vitest": "^5.0.0"
   }
 }
