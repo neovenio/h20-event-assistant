@@ -55,8 +55,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: angular-build
-          path: dist/my-habit-tracker/browser
-deploy-dev:
+          path: dist/h20-event-assistant/browser
+
+  deploy-dev:
   needs:
     - code-quality
     - test
@@ -82,8 +83,8 @@ deploy-dev:
 
     - name: Deploy to Firebase Dev
       run: npx firebase-tools@15.28.1 deploy --only hosting --project h20-event-assistant-dev
-
-deploy-prod:
+      
+  deploy-prod:
   needs:
     - code-quality
     - test
