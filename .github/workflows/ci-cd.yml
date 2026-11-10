@@ -105,7 +105,7 @@ deploy-prod:
       uses: actions/download-artifact@v5
       with:
         name: angular-build
-        path: dist/my-habit-tracker/browser
+        path: dist/h20-event-assistant/browser
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v3
@@ -113,4 +113,4 @@ deploy-prod:
         credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
     - name: Deploy to Firebase Production
-      run: npx firebase-tools@15.28.1 deploy --only hosting --project my-habit-tracker-prod
+      run: npx firebase-tools@15.28.1 deploy --only hosting --h20-event-assistant-prod
