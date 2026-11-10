@@ -1,0 +1,6 @@
+{
+  "hosting": {
+    "public": "dist/h20-event-assistant/browser",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+  }
+}

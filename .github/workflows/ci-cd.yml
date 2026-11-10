@@ -56,3 +56,61 @@ jobs:
         with:
           name: angular-build
           path: dist/my-habit-tracker/browser
+deploy-dev:
+  needs:
+    - code-quality
+    - test
+    - build
+  if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+  runs-on: ubuntu-latest
+  environment: development
+
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: '22.18.0'
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v5
+      with:
+        name: angular-build
+        path: dist/my-habit-tracker/browser
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+    - name: Deploy to Firebase Dev
+      run: npx firebase-tools@15.28.1 deploy --only hosting --project my-habit-tracker-dev
+
+deploy-prod:
+  needs:
+    - code-quality
+    - test
+    - build
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  runs-on: ubuntu-latest
+  environment: production
+
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v5
+      with:
+        name: angular-build
+        path: dist/my-habit-tracker/browser
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+    - name: Deploy to Firebase Production
+      run: npx firebase-tools@15.28.1 deploy --only hosting --project my-habit-tracker-prod
