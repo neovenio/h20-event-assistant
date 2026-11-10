@@ -1,4 +1,5 @@
 name: Angular CI/CD
+
 on:
   push:
     branches:
@@ -8,13 +9,13 @@ on:
     branches:
       - main
       - dev
+
 jobs:
   code-quality:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: npm ci
@@ -27,10 +28,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: npm ci
@@ -40,10 +40,9 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: npm ci
@@ -58,55 +57,47 @@ jobs:
           path: dist/h20-event-assistant/browser
 
   deploy-dev:
-  needs:
-    - code-quality
-    - test
-    - build
-  if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-  runs-on: ubuntu-latest
-  environment: development
+    needs: [code-quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: angular-build
+          path: dist/h20-event-assistant/browser
 
-    - name: Download build artifact
-      uses: actions/download-artifact@v5
-      with:
-        name: angular-build
-        path: dist/h20-event-assistant/browser
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v3
-      with:
-        credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
-
-    - name: Deploy to Firebase Dev
-      run: npx firebase-tools@15.28.1 deploy --only hosting --project h20-event-assistant-dev
+      - name: Deploy to Firebase Dev
+        run: npx firebase-tools deploy --only hosting --project h20-event-assistant-dev
 
   deploy-prod:
-  needs:
-    - code-quality
-    - test
-    - build
-  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  runs-on: ubuntu-latest
-  environment: production
+    needs: [code-quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: angular-build
+          path: dist/h20-event-assistant/browser
 
-    - name: Download build artifact
-      uses: actions/download-artifact@v5
-      with:
-        name: angular-build
-        path: dist/h20-event-assistant/browser
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v3
-      with:
-        credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
-
-    - name: Deploy to Firebase Production
-      run: npx firebase-tools@15.28.1 deploy --only hosting --project h20-event-assistant-prod
+      - name: Deploy to Firebase Production
+        run: npx firebase-tools deploy --only hosting --project h20-event-assistant-prod
