@@ -265,8 +265,13 @@ test('workflow exports have valid connections, authentication and compilable Cod
 });
 
 test('live chat suggests only a published room that fits the group', () => {
+  const identity = { uid: 'test-user', email: 'customer@example.test' };
   const context = domain.publicAction(
-    { action: 'chat', message: 'Een teamdag voor 30 personen met budget 1000' },
+    {
+      action: 'chat',
+      _identity: identity,
+      message: 'Een teamdag voor 30 personen met budget 1000',
+    },
     rows(),
   );
   assert.equal(context.config.participants, 30);
@@ -279,7 +284,10 @@ test('live chat suggests only a published room that fits the group', () => {
     ],
   });
   assert.equal(result.response.config.selectedRoomId, room.id);
-  const tooLarge = domain.publicAction({ action: 'chat', message: 'Voor 500 personen' }, rows());
+  const tooLarge = domain.publicAction(
+    { action: 'chat', _identity: identity, message: 'Voor 500 personen' },
+    rows(),
+  );
   assert.equal(tooLarge.config, null);
 });
 
@@ -687,4 +695,244 @@ test('staff cannot approve a booking that is still claiming', () => {
       ),
     /verwerkt/,
   );
+});
+
+// --- Webhook abuse protection & rate limits (#10) ----------------------------------------
+const upsertParsed = (parsedRows, writeRow) => [
+  ...parsedRows.filter((item) => item.recordId !== writeRow.recordId),
+  ...domain.parseRows([writeRow]),
+];
+
+test('chat without Firebase _identity.uid rejects with 401', () => {
+  for (const body of [
+    { action: 'chat', message: 'Hallo' },
+    { action: 'chat', _identity: null, message: 'Hallo' },
+    { action: 'chat', _identity: {}, message: 'Hallo' },
+  ]) {
+    assert.throws(
+      () => domain.publicAction(body, rows()),
+      (err) => err.status === 401 && /Log eerst in/.test(err.message),
+    );
+  }
+});
+
+test('per-client rate limit on chat and event-request returns 429 on (limit + 1)th request and resets after 1 hour', () => {
+  const t0 = 1_700_000_000_000;
+  let state = rows();
+  for (let i = 0; i < domain.RATE_LIMITS.chat.perClient; i++) {
+    const out = domain.publicAction(
+      {
+        action: 'chat',
+        _identity: { uid: 'chat-user' },
+        _clientKey: '203.0.113.10',
+        message: `Vraag ${i}`,
+      },
+      state,
+      t0 + i * 1000,
+    );
+    assert.equal(out.route, 'gemini');
+    state = upsertParsed(state, out.rateLimitWrite);
+  }
+  assert.throws(
+    () =>
+      domain.publicAction(
+        {
+          action: 'chat',
+          _identity: { uid: 'chat-user' },
+          _clientKey: '203.0.113.10',
+          message: 'Te veel',
+        },
+        state,
+        t0 + 30_000,
+      ),
+    (err) => err.status === 429 && /Te veel verzoeken/.test(err.message),
+  );
+  // Succeeds again 1 hour after the earliest timestamp (frees 1 slot) and prunes all after full window
+  const afterFirstExpiry = domain.publicAction(
+    {
+      action: 'chat',
+      _identity: { uid: 'chat-user' },
+      _clientKey: '203.0.113.10',
+      message: 'Weer welkom',
+    },
+    state,
+    t0 + 3600_001,
+  );
+  assert.equal(afterFirstExpiry.route, 'gemini');
+  assert.equal(JSON.parse(afterFirstExpiry.rateLimitWrite.payload).data.global.length, 20);
+  const afterFullWindow = domain.publicAction(
+    {
+      action: 'chat',
+      _identity: { uid: 'chat-user' },
+      _clientKey: '203.0.113.10',
+      message: 'Schoon venster',
+    },
+    state,
+    t0 + 19_000 + 3600_001,
+  );
+  assert.equal(afterFullWindow.route, 'gemini');
+  assert.equal(JSON.parse(afterFullWindow.rateLimitWrite.payload).data.global.length, 1);
+
+  // event-request per-client limit (5/hour)
+  let reqState = rows();
+  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
+    const body = request();
+    body._clientKey = '203.0.113.20';
+    body.config.date = `2099-12-${String(10 + i).padStart(2, '0')}`;
+    const out = domain.publicAction(body, reqState, t0);
+    assert.equal(out.route, 'claim');
+    reqState = upsertParsed(reqState, out.rateLimitWrite);
+  }
+  const overReq = request();
+  overReq._clientKey = '203.0.113.20';
+  overReq.config.date = '2099-12-25';
+  assert.throws(
+    () => domain.publicAction(overReq, reqState, t0 + 10_000),
+    (err) => err.status === 429 && /Te veel verzoeken/.test(err.message),
+  );
+  const afterReqWindow = domain.publicAction(overReq, reqState, t0 + 3600_001);
+  assert.equal(afterReqWindow.route, 'claim');
+  assert.equal(JSON.parse(afterReqWindow.rateLimitWrite.payload).data.global.length, 1);
+});
+
+test('global rate limit across distinct clients returns 429 when hourly cap is reached', () => {
+  const t0 = 1_700_000_000_000;
+  let chatState = rows();
+  for (let i = 0; i < domain.RATE_LIMITS.chat.global; i++) {
+    const out = domain.publicAction(
+      {
+        action: 'chat',
+        _identity: { uid: `user-${i}` },
+        _clientKey: `198.51.100.${i}`,
+        message: 'Hallo',
+      },
+      chatState,
+      t0 + i,
+    );
+    chatState = upsertParsed(chatState, out.rateLimitWrite);
+  }
+  assert.throws(
+    () =>
+      domain.publicAction(
+        {
+          action: 'chat',
+          _identity: { uid: 'fresh-user' },
+          _clientKey: '192.0.2.99',
+          message: 'Nog een vraag',
+        },
+        chatState,
+        t0 + 5000,
+      ),
+    (err) => err.status === 429,
+  );
+
+  let reqState = rows();
+  for (let i = 0; i < domain.RATE_LIMITS['event-request'].global; i++) {
+    const body = request();
+    body._identity = { uid: `req-user-${i}`, email: `u${i}@example.test` };
+    body._clientKey = `198.51.101.${i}`;
+    const month = String(Math.floor(i / 25) + 1).padStart(2, '0');
+    const day = String((i % 25) + 1).padStart(2, '0');
+    body.config.date = `2099-${month}-${day}`;
+    const out = domain.publicAction(body, reqState, t0 + i);
+    reqState = upsertParsed(reqState, out.rateLimitWrite);
+  }
+  const blocked = request();
+  blocked._identity = { uid: 'fresh-req-user', email: 'fresh@example.test' };
+  blocked._clientKey = '192.0.2.200';
+  blocked.config.date = '2099-11-28';
+  assert.throws(
+    () => domain.publicAction(blocked, reqState, t0 + 5000),
+    (err) => err.status === 429,
+  );
+});
+
+test('idempotent retry of an existing held event-request returns 200 even when rate limit is full', () => {
+  const t0 = 1_700_000_000_000;
+  const saved = savedRequest();
+  saved.body._clientKey = '203.0.113.55';
+  let state = [...saved.rows];
+  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
+    const writeRow = domain.checkRateLimit(state, 'event-request', '203.0.113.55', t0 + i);
+    state = upsertParsed(state, writeRow);
+  }
+  // Confirm new requests from this client are rate-limited with 429
+  const fresh = request();
+  fresh._clientKey = '203.0.113.55';
+  fresh.config.date = '2099-12-20';
+  assert.throws(
+    () => domain.publicAction(fresh, state, t0 + 500),
+    (err) => err.status === 429,
+  );
+  // Retrying the already-saved requestId returns 200 receipt without hitting Gemini or 429
+  const retry = domain.publicAction(saved.body, state, t0 + 500);
+  assert.equal(retry.route, 'respond');
+  assert.equal(retry.status, 200);
+  assert.equal(retry.response.booking.id, saved.body.requestId);
+});
+
+test('raw caller IP is SHA-256 hashed, never stored in plain text, and ratelimit rows stay out of admin snapshot', () => {
+  const { clientKeyFromHeaders, sha256 } = require('../code/auth-context.cjs');
+  assert.equal(sha256('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  const rawIp = '203.0.113.77';
+  const fromForwarded = clientKeyFromHeaders({ 'X-Forwarded-For': `${rawIp}, 10.0.0.1` });
+  const fromCf = clientKeyFromHeaders({ 'cf-connecting-ip': rawIp });
+  const fromReal = clientKeyFromHeaders({ 'x-real-ip': rawIp });
+  assert.match(fromForwarded, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(fromForwarded, fromCf);
+  assert.equal(fromForwarded, fromReal);
+  assert.ok(!fromForwarded.includes(rawIp));
+
+  const out = domain.publicAction(
+    {
+      action: 'chat',
+      _identity: { uid: 'privacy-user' },
+      _clientKey: rawIp,
+      message: 'Test privacy',
+    },
+    rows(),
+    1_700_000_000_000,
+  );
+  assert.ok(!out.rateLimitWrite.payload.includes(rawIp));
+  const keys = Object.keys(JSON.parse(out.rateLimitWrite.payload).data.clients);
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /^sha256:[0-9a-f]{64}$/);
+
+  const stateWithRateLimit = upsertParsed(rows(), out.rateLimitWrite);
+  const snap = domain.adminAction({ action: 'snapshot' }, stateWithRateLimit).response;
+  assert.ok(!JSON.stringify(snap).includes('ratelimit'));
+  assert.equal(snap.bookings.length, 0);
+  assert.equal(snap.logs.length, 0);
+});
+
+test('Workflow B enforces Firebase auth on chat and upserts rate-limit row before Gemini', () => {
+  const wf = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../workflows/B-public-api-and-proposals.json'), 'utf8'),
+  );
+  const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+  const next = (from, index = 0) =>
+    (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
+
+  // Verify rate-limit Data Table upsert sits on the Needs Gemini -> Gemini path
+  assert.deepEqual(next('Needs Gemini', 0), ['Rate limit payload']);
+  assert.deepEqual(next('Rate limit payload'), ['Record rate limit']);
+  assert.equal(byName['Record rate limit'].type, 'n8n-nodes-base.dataTable');
+  assert.equal(byName['Record rate limit'].parameters.operation, 'upsert');
+  assert.deepEqual(next('Record rate limit'), ['After rate limit']);
+  assert.deepEqual(next('After rate limit'), ['Rate limit recorded']);
+  assert.deepEqual(next('Rate limit recorded', 0), ['Gemini']);
+  assert.deepEqual(next('Rate limit recorded', 1), ['Result']);
+
+  // Execute Access node inside restricted VM context without require()
+  const runAccess = (action, headers = {}) => {
+    const fn = vm.runInNewContext(`(function($input){${byName['Access'].parameters.jsCode}\n})`);
+    return fn({ first: () => ({ json: { headers, body: { action } } }) })[0].json;
+  };
+  assert.equal(runAccess('catalogue').route, 'public');
+  assert.equal(runAccess('chat', { 'x-forwarded-for': '198.51.100.42' }).route, 'verify');
+  assert.equal(runAccess('event-request', { 'x-forwarded-for': '198.51.100.42' }).route, 'verify');
+  assert.equal(runAccess('my-requests').route, 'verify');
+  const accessOut = runAccess('chat', { 'x-forwarded-for': '198.51.100.42, 10.0.0.5' });
+  assert.match(accessOut.clientKey, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(!JSON.stringify(accessOut).includes('198.51.100.42'));
 });

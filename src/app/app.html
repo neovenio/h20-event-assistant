@@ -199,7 +199,10 @@
               </section>
             </div>
             <aside class="dashboard-aside">
-              <app-assistant (build)="applyPlan($event)" />
+              <app-assistant
+                (build)="applyPlan($event)"
+                (requestLogin)="login = true; chat = false"
+              />
               <section class="panel">
                 <span class="eyebrow">ALLES OP ÉÉN LOCATIE</span>
                 <h3>Meer dan een evenement</h3>
@@ -459,7 +462,7 @@
 }
 @if (chat) {
   <app-modal heading="AI Planning Studio" (dismissed)="chat = false"
-    ><app-assistant (build)="applyPlan($event)"
+    ><app-assistant (build)="applyPlan($event)" (requestLogin)="login = true; chat = false"
   /></app-modal>
 }
 @if (selectedRoom) {
