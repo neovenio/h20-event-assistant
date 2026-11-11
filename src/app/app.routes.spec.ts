@@ -293,6 +293,80 @@ describe('routing', () => {
     await router.navigateByUrl('/nope#request=abc&token=t');
     expect(router.parseUrl(router.url).fragment).toBe('request=abc&token=t');
   });
+
+  it('lazy-loads and renders app-admin on /admin/bookings for staff', async () => {
+    TestBed.inject(AuthService).staff.set(true);
+    const fixture = await open('/admin');
+    expect(TestBed.inject(Router).url).toBe('/admin/bookings');
+    const admin = fixture.nativeElement.querySelector('app-admin') as HTMLElement | null;
+    expect(admin).not.toBeNull();
+    expect(admin?.querySelector('h1')?.textContent).toContain('Evenementen beheren');
+    expect(admin?.querySelector('.subnav .active')?.textContent).toContain('Alle aanvragen');
+    expect(admin?.textContent).toContain('Referentie');
+  });
+
+  it('deep-links to /admin/logs and renders the logs section in app-admin', async () => {
+    TestBed.inject(AuthService).staff.set(true);
+    const fixture = await open('/admin/logs');
+    expect(TestBed.inject(Router).url).toBe('/admin/logs');
+    const admin = fixture.nativeElement.querySelector('app-admin') as HTMLElement | null;
+    expect(admin).not.toBeNull();
+    expect(admin?.querySelector('.subnav .active')?.textContent).toContain('Activiteitenlog');
+    expect(admin?.textContent).toContain('Medewerker');
+    expect(admin?.textContent).toContain('Wijziging');
+  });
+
+  it('preserves fragment on /admin/logs and supports demo staff mode', async () => {
+    TestBed.inject(AuthService).demoStaff.set(true);
+    const fixture = await open('/admin/logs#request=a&token=b');
+    const router = TestBed.inject(Router);
+    expect(router.url).toBe('/admin/logs#request=a&token=b');
+    expect(router.parseUrl(router.url).fragment).toBe('request=a&token=b');
+    const admin = fixture.nativeElement.querySelector('app-admin') as HTMLElement | null;
+    expect(admin?.querySelector('.subnav .active')?.textContent).toContain('Activiteitenlog');
+    expect(admin?.textContent).toContain('Demo sluiten');
+  });
+
+  it('forwards selectBooking, newBooking and logout from lazy-loaded app-admin to App', async () => {
+    TestBed.inject(AuthService).demoStaff.set(true);
+    const fixture = await open('/admin');
+    const admin = () => fixture.nativeElement.querySelector('app-admin') as HTMLElement;
+
+    const viewBtn = Array.from(admin().querySelectorAll('button')).find(
+      (btn) => btn.textContent?.trim() === 'Bekijk',
+    );
+    expect(viewBtn).toBeDefined();
+    viewBtn!.click();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.selectedBooking).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-booking-detail')).not.toBeNull();
+
+    fixture.componentInstance.selectedBooking = null;
+    const newBtn = Array.from(admin().querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('Nieuwe aanvraag'),
+    );
+    newBtn!.click();
+    await fixture.whenStable();
+    expect(TestBed.inject(Router).url).toBe('/plan');
+    expect(fixture.nativeElement.querySelector('app-event-builder')).not.toBeNull();
+
+    await TestBed.inject(Router).navigateByUrl('/admin');
+    await fixture.whenStable();
+    const logoutBtn = Array.from(admin().querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('Demo sluiten'),
+    );
+    logoutBtn!.click();
+    await fixture.whenStable();
+    expect(TestBed.inject(Router).url).toBe('/');
+    expect(TestBed.inject(AuthService).demoStaff()).toBe(false);
+  });
+
+  it('blocks non-staff users from /admin in the app shell and redirects to /', async () => {
+    const fixture = await open('/admin');
+    expect(TestBed.inject(Router).url).toBe('/');
+    expect(fixture.nativeElement.querySelector('app-admin')).toBeNull();
+    expect(fixture.componentInstance.login).toBe(true);
+  });
 });
 
 describe('staff guard', () => {
@@ -320,7 +394,11 @@ describe('staff guard', () => {
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl('/admin');
     expect(TestBed.inject(Router).url).toBe('/admin/bookings');
+    expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain(
+      'Evenementen beheren',
+    );
     await harness.navigateByUrl('/admin/logs');
     expect(TestBed.inject(Router).url).toBe('/admin/logs');
+    expect(harness.routeNativeElement?.textContent).toContain('Wijziging');
   });
 });

@@ -2,6 +2,9 @@ import { AuthService } from './event-assistant/auth-service';
 import {
   ChangeDetectorRef,
   Component,
+  OnDestroy,
+  OutputRef,
+  OutputRefSubscription,
   afterNextRender,
   computed,
   effect,
@@ -11,9 +14,9 @@ import {
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
-import { ADMIN_SECTIONS, PAGE_PATHS, pageForPath } from './app.routes';
+import { PAGE_PATHS, pageForPath } from './app.routes';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { EventStore } from './event-assistant/event-store';
 import { Booking, EventConfiguration, Room } from './event-assistant/models';
@@ -24,7 +27,15 @@ import { BookingDetail } from './event-assistant/components/booking-detail';
 import { Modal } from './event-assistant/components/modal';
 import { Assistant } from './event-assistant/components/assistant';
 import { Icon } from './event-assistant/components/icon';
-import { Admin } from './event-assistant/components/admin';
+interface AdminPortal {
+  selectBooking: OutputRef<Booking>;
+  newBooking: OutputRef<void>;
+  logout: OutputRef<void>;
+}
+interface BuilderHandle {
+  baseline: string;
+  dirty(): boolean;
+}
 @Component({
   selector: 'app-root',
   imports: [
@@ -36,15 +47,15 @@ import { Admin } from './event-assistant/components/admin';
     BookingDetail,
     Modal,
     Assistant,
-    Admin,
     Icon,
     RouterLink,
     RouterLinkActive,
+    RouterOutlet,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App {
+export class App implements OnDestroy {
   readonly auth = inject(AuthService);
   authEmail = '';
   authPassword = '';
@@ -64,7 +75,6 @@ export class App {
     (this.urlTree().root.children['primary']?.segments ?? []).map((segment) => segment.path),
   );
   readonly tab = computed(() => pageForPath(this.segments()[0]));
-  readonly adminSection = computed(() => this.segments()[1] ?? ADMIN_SECTIONS[0]);
   /** The page rendered behind the event builder, which opens as an overlay on /plan. */
   readonly page = computed(() => (this.tab() === 'event-builder' ? 'dashboard' : this.tab()));
   readonly mobile = signal(false);
@@ -102,7 +112,7 @@ export class App {
   private bookingBaseline: string | null = null;
   replacePlan: { config: EventConfiguration | null } | null = null;
   private bookingProposalId: string | null = null;
-  private readonly builderRef = viewChild(EventBuilder);
+  private readonly builderRef = viewChild<BuilderHandle>('builderRef');
   private builderRequested = false;
   private receiptReady = false;
   private openedReceipt = '';
@@ -299,6 +309,26 @@ export class App {
     this.auth.demoStaff.set(true);
     this.login = false;
     void this.router.navigateByUrl('/' + PAGE_PATHS.admin);
+  }
+  private adminSubscriptions: OutputRefSubscription[] = [];
+  attachAdmin(component: unknown): void {
+    this.detachAdmin();
+    const portal = component as AdminPortal;
+    this.adminSubscriptions = [
+      portal.selectBooking.subscribe((booking) => {
+        this.selectedBooking = booking;
+        this.cdr.markForCheck();
+      }),
+      portal.newBooking.subscribe(() => this.openBuilder()),
+      portal.logout.subscribe(() => this.logout()),
+    ];
+  }
+  detachAdmin(): void {
+    for (const sub of this.adminSubscriptions) sub.unsubscribe();
+    this.adminSubscriptions = [];
+  }
+  ngOnDestroy(): void {
+    this.detachAdmin();
   }
   logout(): void {
     void this.auth.logout();

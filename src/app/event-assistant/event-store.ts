@@ -1,12 +1,4 @@
-import { Injectable, afterNextRender, computed, signal, inject } from '@angular/core';
-import {
-  INITIAL_ROOMS,
-  INITIAL_BOOKINGS,
-  INITIAL_AVAILABILITY_BLOCKS,
-  INITIAL_ACTIVITY_LOGS,
-  INITIAL_CATERING_PACKAGES,
-  INITIAL_EVENT_UPGRADES,
-} from './data/initial-data';
+import { Injectable, PendingTasks, afterNextRender, computed, signal, inject } from '@angular/core';
 import {
   ActivityLog,
   AvailabilityBlock,
@@ -37,6 +29,7 @@ interface DemoState {
 
 @Injectable({ providedIn: 'root' })
 export class EventStore {
+  private readonly pendingTasks = inject(PendingTasks);
   readonly api = inject(N8nClient);
   readonly live = computed(() => !!this.api.baseUrl());
   readonly connectionError = signal('');
@@ -46,12 +39,12 @@ export class EventStore {
   private pendingRequest: { signature: string; requestId: string; customerToken: string } | null =
     null;
   private receipts: Record<string, string> = {};
-  readonly rooms = signal(clone(INITIAL_ROOMS));
-  readonly bookings = signal(clone(INITIAL_BOOKINGS));
-  readonly blocks = signal(clone(INITIAL_AVAILABILITY_BLOCKS));
-  readonly logs = signal(clone(INITIAL_ACTIVITY_LOGS));
-  readonly catering = signal(clone(INITIAL_CATERING_PACKAGES));
-  readonly upgrades = signal(clone(INITIAL_EVENT_UPGRADES));
+  readonly rooms = signal<Room[]>([]);
+  readonly bookings = signal<Booking[]>([]);
+  readonly blocks = signal<AvailabilityBlock[]>([]);
+  readonly logs = signal<ActivityLog[]>([]);
+  readonly catering = signal<CateringPackage[]>([]);
+  readonly upgrades = signal<EventUpgrade[]>([]);
   readonly proposals = signal<ProposalItem[]>([]);
   readonly ownBookingIds = signal<string[]>([]);
   readonly storageWarning = signal('');
@@ -62,54 +55,66 @@ export class EventStore {
   private browserReady = false;
 
   constructor() {
-    afterNextRender(async () => {
-      this.browserReady = true;
-      try {
-        const response = await fetch('/h20-runtime.json');
-        if (!response.ok) throw new Error('Runtime-instellingen konden niet worden geladen.');
-        const settings = await response.json();
-        if (settings.n8nWebhookBaseUrl) {
-          this.api.configure(settings.n8nWebhookBaseUrl);
-          this.activities.set([]);
-          this.rooms.set([]);
-          this.bookings.set([]);
-          this.blocks.set([]);
-          this.logs.set([]);
-          this.catering.set([]);
-          this.upgrades.set([]);
-          await this.refreshCatalogue();
-          this.loading.set(false);
-          return;
+    afterNextRender(() =>
+      this.pendingTasks.run(async () => {
+        this.browserReady = true;
+        try {
+          const response = await fetch('/h20-runtime.json');
+          if (!response.ok) throw new Error('Runtime-instellingen konden niet worden geladen.');
+          const settings = await response.json();
+          if (settings.n8nWebhookBaseUrl) {
+            this.api.configure(settings.n8nWebhookBaseUrl);
+            this.activities.set([]);
+            this.rooms.set([]);
+            this.bookings.set([]);
+            this.blocks.set([]);
+            this.logs.set([]);
+            this.catering.set([]);
+            this.upgrades.set([]);
+            await this.refreshCatalogue();
+            this.loading.set(false);
+            return;
+          }
+        } catch (error) {
+          this.connectionError.set(
+            error instanceof Error ? error.message : 'De verbinding is mislukt.',
+          );
+          if (this.live()) {
+            this.loading.set(false);
+            return;
+          }
         }
-      } catch (error) {
-        this.connectionError.set(
-          error instanceof Error ? error.message : 'De verbinding is mislukt.',
-        );
-        if (this.live()) {
-          this.loading.set(false);
-          return;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const value = JSON.parse(raw) as DemoState;
+            if (!this.validState(value)) throw new Error('Invalid saved demo');
+            this.rooms.set(value.rooms);
+            this.bookings.set(value.bookings);
+            this.blocks.set(value.blocks);
+            this.logs.set(value.logs);
+            this.catering.set(value.catering);
+            this.upgrades.set(value.upgrades);
+            this.proposals.set(value.proposals);
+            this.ownBookingIds.set(value.ownBookingIds);
+            this.loading.set(false);
+            return;
+          }
+        } catch {
+          this.storageWarning.set(
+            'Opgeslagen demogegevens konden niet worden geladen. Deze sessie gebruikt de voorbeeldgegevens.',
+          );
         }
-      }
-      this.loading.set(false);
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const value = JSON.parse(raw) as DemoState;
-        if (!this.validState(value)) throw new Error('Invalid saved demo');
-        this.rooms.set(value.rooms);
-        this.bookings.set(value.bookings);
-        this.blocks.set(value.blocks);
-        this.logs.set(value.logs);
-        this.catering.set(value.catering);
-        this.upgrades.set(value.upgrades);
-        this.proposals.set(value.proposals);
-        this.ownBookingIds.set(value.ownBookingIds);
-      } catch {
-        this.storageWarning.set(
-          'Opgeslagen demogegevens konden niet worden geladen. Deze sessie gebruikt de voorbeeldgegevens.',
-        );
-      }
-    });
+        const demo = await import('./data/initial-data');
+        if (!this.rooms().length) this.rooms.set(clone(demo.INITIAL_ROOMS));
+        if (!this.bookings().length) this.bookings.set(clone(demo.INITIAL_BOOKINGS));
+        if (!this.blocks().length) this.blocks.set(clone(demo.INITIAL_AVAILABILITY_BLOCKS));
+        if (!this.logs().length) this.logs.set(clone(demo.INITIAL_ACTIVITY_LOGS));
+        if (!this.catering().length) this.catering.set(clone(demo.INITIAL_CATERING_PACKAGES));
+        if (!this.upgrades().length) this.upgrades.set(clone(demo.INITIAL_EVENT_UPGRADES));
+        this.loading.set(false);
+      }),
+    );
   }
   private validState(value: DemoState): boolean {
     return (

@@ -1,7 +1,9 @@
 import { Component, computed, inject, input, output, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe, DatePipe } from '@angular/common';
+import { filter, map } from 'rxjs';
 import { EventStore } from '../event-store';
 import {
   Booking,
@@ -25,8 +27,26 @@ export class Admin {
   readonly selectBooking = output<Booking>();
   readonly newBooking = output<void>();
   readonly logout = output<void>();
-  /** Active sub-tab, taken from the /admin/:section route by the shell. */
-  readonly section = input('bookings');
+  /** Optional explicit sub-tab override; defaults to the active /admin/:section child route. */
+  readonly section = input<string>();
+  private readonly router = inject(Router, { optional: true });
+  private readonly routeUrl = this.router
+    ? toSignal(
+        this.router.events.pipe(
+          filter((event) => event instanceof NavigationEnd),
+          map(() => this.router!.url),
+        ),
+        { initialValue: this.router.url },
+      )
+    : signal('');
+  readonly activeSection = computed(() => {
+    const explicit = this.section();
+    if (explicit) return explicit;
+    const url = this.routeUrl();
+    if (!this.router || !url) return 'bookings';
+    const segments = this.router.parseUrl(url).root.children['primary']?.segments ?? [];
+    return segments[0]?.path === 'admin' ? (segments[1]?.path ?? 'bookings') : 'bookings';
+  });
   readonly query = signal('');
   readonly status = signal('');
   readonly roomFilter = signal('');
