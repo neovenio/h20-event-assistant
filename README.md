@@ -1,59 +1,44 @@
-# H20EventAssistant
+# H20 Event Assistant
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.2.6.
+An AI event-planning and booking assistant for H20 Event Location in Purmerend. Visitors describe their event, get a suggested plan and price, and submit a booking request. Staff review and approve requests before the customer sees the generated explanation.
 
-## Development server
+## Architecture
 
-To start a local development server, run:
+- **Frontend:** Angular 22 with SSR/prerender (`src/`).
+- **Auth and hosting:** Firebase Authentication and Firebase Hosting (`firebase.json`, `.firebaserc`).
+- **Backend:** n8n webhooks plus an n8n Data Table (`backend/n8n/`).
+- **AI:** Gemini is called from n8n, never from the browser.
 
-```bash
-ng serve
-```
+## Demo vs connected mode
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+The app reads a public runtime JSON file (today `public/h20-runtime.json`). If `n8nWebhookBaseUrl` is empty, the app runs in demo mode with local sample data. If it points at the n8n webhook base URL, the app runs in connected mode. This file is public: never put secrets in it.
 
-## Code scaffolding
+## Run locally
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+The Angular CLI 22 needs Node `^22.22.3 || ^24.15.0 || >=26`. The repo pins `24.15.0` in `.nvmrc`.
 
 ```bash
-ng generate --help
+nvm use
+npm ci
+npm start
 ```
 
-## Building
-
-To build the project run:
+## Validation
 
 ```bash
-ng build
+npm run build
+npm run lint
+npm run test:ci
+npm run format:check
+node --test backend/n8n/tests/domain.test.cjs
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Deployment
 
-## Running unit tests
+CI (`.github/workflows/ci-cd.yml`) runs format, lint, test and build. Pushing to `main` deploys production; pushing to `dev` deploys the dev environment.
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
+## More documentation
 
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+- [Angular migration notes](docs/ANGULAR-MIGRATION.md)
+- [n8n backend README](backend/n8n/README.md)
+- [Issue tracker contract](docs/agents/issue-tracker.md)
