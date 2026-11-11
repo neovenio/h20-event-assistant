@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectorRef, Component, computed, inject, input, output } from '@angular/core';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { EventStore } from '../event-store';
@@ -11,6 +11,7 @@ import { Modal } from './modal';
 })
 export class BookingDetail {
   readonly store = inject(EventStore);
+  private readonly cdr = inject(ChangeDetectorRef);
   readonly value = input.required<Booking>();
   readonly admin = input(false);
   readonly dismissed = output<void>();
@@ -22,6 +23,7 @@ export class BookingDetail {
   refundReason = '';
   error = '';
   busy = false;
+  downloadingPdf = false;
   invoice = false;
   reviewText = '';
   editing = false;
@@ -62,6 +64,28 @@ export class BookingDetail {
       );
       this.editing = false;
     });
+  }
+  async downloadPdf(): Promise<void> {
+    if (this.downloadingPdf) return;
+    this.downloadingPdf = true;
+    this.error = '';
+    try {
+      const { buildOfferDocument, downloadOfferPdf } = await import('../pdf-offer');
+      const doc = buildOfferDocument(this.booking(), {
+        live: this.store.live(),
+        admin: this.admin(),
+        rooms: this.store.rooms(),
+        catering: this.store.catering(),
+        upgrades: this.store.upgrades(),
+        activities: this.store.activities(),
+      });
+      downloadOfferPdf(doc);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'PDF downloaden is mislukt.';
+    } finally {
+      this.downloadingPdf = false;
+      this.cdr.markForCheck();
+    }
   }
   print(): void {
     this.invoice = true;

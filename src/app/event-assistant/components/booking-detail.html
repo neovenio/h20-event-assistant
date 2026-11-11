@@ -153,7 +153,12 @@
     <p class="error" role="alert">{{ error }}</p>
   }
   <footer class="modal-footer no-print">
-    <span class="muted">Voorlopige kostenweergave, geen betaalverzoek.</span
-    ><button (click)="print()">Afdrukken / bewaren als PDF</button>
+    <span class="muted">Voorlopige kostenweergave, geen betaalverzoek.</span>
+    <div class="actions">
+      <button type="button" (click)="print()">Afdrukken</button>
+      <button type="button" class="primary" (click)="downloadPdf()" [disabled]="downloadingPdf">
+        Download PDF
+      </button>
+    </div>
   </footer>
 </app-modal>
