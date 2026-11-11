@@ -7,7 +7,12 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
   const resolve = (relPath) => path.join(rootDir, relPath);
   const css = fs.readFileSync(resolve('src/app/event-assistant/brand.css'), 'utf8');
   const html = fs.readFileSync(resolve('src/app/app.html'), 'utf8');
-  const runtime = JSON.parse(fs.readFileSync(resolve('public/h20-runtime.json'), 'utf8'));
+  const indexHtml = fs.readFileSync(resolve('src/index.html'), 'utf8');
+  const runtimePath =
+    rootDir === DEFAULT_ROOT && process.env.H20_RUNTIME_PATH
+      ? process.env.H20_RUNTIME_PATH
+      : resolve('public/h20-runtime.json');
+  const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
   const demoData = fs.readFileSync(resolve('src/app/event-assistant/data/initial-data.ts'), 'utf8');
   const demoImageUrls = [...demoData.matchAll(/imageUrl:\s*'([^']+)'/g)].map((m) => m[1]);
   const checks = [
@@ -16,6 +21,12 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
       ['#000000', '#FFFFFF', '#E1014B', '#5FC2D2'].every((c) =>
         css.toLowerCase().includes(c.toLowerCase()),
       ),
+    ],
+    [
+      'Officieel lettertype / webfont-stack ingesteld',
+      css.includes('nudista-web') &&
+        css.includes('Barlow') &&
+        indexHtml.includes('fonts.googleapis.com'),
     ],
     ['Aangeleverd logo aanwezig', fs.existsSync(resolve('public/assets/brand/h20-logo.png'))],
     ['Inklapbare navigatie', html.includes('aria-expanded') && html.includes('nav-collapsed')],
@@ -48,7 +59,6 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
   }
 
   for (const item of [
-    'Visuele gelijkheid met officiële website en exact lettertype',
     'Productie-authenticatie voor klanten en medewerkers',
     'Live n8n/Gemini en uitsluitend gecontroleerde broncatalogus',
     'Budgetgarantie inclusief onbekende tarieven',

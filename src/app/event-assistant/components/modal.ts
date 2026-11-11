@@ -18,8 +18,8 @@ import { Component, ElementRef, afterNextRender, input, output, viewChild } from
       width: min(1000px, calc(100vw - 32px));
       max-height: 90dvh;
       padding: 0;
-      border: 1px solid #334155;
-      border-radius: 0;
+      border: 1px solid #0003;
+      border-radius: 8px;
       background: #ffffff;
       color: #000000;
       box-shadow: 0 30px 100px #0008;
@@ -33,11 +33,11 @@ import { Component, ElementRef, afterNextRender, input, output, viewChild } from
       justify-content: space-between;
       align-items: center;
       padding: 22px 28px;
-      border-bottom: 1px solid #263247;
+      border-bottom: 1px solid #0002;
     }
     .modal-header h2 {
       margin: 6px 0 0;
-      font-size: 22px;
+      font-size: clamp(1.25rem, 1.1rem + 0.5vw, 1.5rem);
     }
     .modal-body {
       padding: 26px;
