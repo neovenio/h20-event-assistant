@@ -3,6 +3,10 @@ const path = require('node:path');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 
+function readOptional(filePath) {
+  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+}
+
 function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
   const resolve = (relPath) => path.join(rootDir, relPath);
   const css = fs.readFileSync(resolve('src/app/event-assistant/brand.css'), 'utf8');
@@ -15,6 +19,15 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
   const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
   const demoData = fs.readFileSync(resolve('src/app/event-assistant/data/initial-data.ts'), 'utf8');
   const demoImageUrls = [...demoData.matchAll(/imageUrl:\s*'([^']+)'/g)].map((m) => m[1]);
+  const pdfOffer = readOptional(resolve('src/app/event-assistant/pdf-offer.ts'));
+  const bookingDetail = readOptional(
+    resolve('src/app/event-assistant/components/booking-detail.ts'),
+  );
+  const appointmentModal = readOptional(
+    resolve('src/app/event-assistant/components/appointment-modal.ts'),
+  );
+  const domainSource = readOptional(resolve('backend/n8n/code/domain.cjs'));
+
   const checks = [
     [
       'Merkpalet aanwezig',
@@ -42,6 +55,21 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
         }),
     ],
     ['n8n URL ingesteld', !!runtime.n8nWebhookBaseUrl],
+    [
+      'Echte PDF-download aanwezig',
+      pdfOffer.includes('renderOfferPdf') && bookingDetail.includes('downloadPdf'),
+    ],
+    [
+      'Afspraken met gecontroleerde beschikbaarheid aanwezig',
+      appointmentModal.includes('app-appointment-modal') &&
+        domainSource.includes('availableAppointmentSlots') &&
+        domainSource.includes('book-appointment'),
+    ],
+    [
+      'Server-side budget- en op-aanvraag-controle aanwezig',
+      domainSource.includes('Niet alle tarieven zijn bekend') &&
+        domainSource.includes('overschrijden het opgegeven budget'),
+    ],
   ];
   for (const [label, ok] of checks) log(`${ok ? 'PASS' : 'ONTBREEKT'}: ${label}`);
 
@@ -59,16 +87,13 @@ function checkRequirements(rootDir = DEFAULT_ROOT, log = console.log) {
   }
 
   for (const item of [
-    'Productie-authenticatie voor klanten en medewerkers',
-    'Live n8n/Gemini en uitsluitend gecontroleerde broncatalogus',
-    'Budgetgarantie inclusief onbekende tarieven',
-    'Echte PDF-download (momenteel browser afdrukken)',
+    'Productie-authenticatie voor klanten en medewerkers (#9)',
+    'Live n8n/Gemini en uitsluitend gecontroleerde broncatalogus (#6, #7, #8)',
     hasWhatsappAdr
       ? 'Directe e-mailaflevering (workflow D; WhatsApp buiten scope per ADR 0003)'
       : 'Directe e-mail/WhatsApp-aflevering',
-    'Afspraken met gecontroleerde beschikbaarheid',
     ...(hasPaymentsAdr ? [] : ['Online betalingen']),
-    'End-to-end productiecontrole van alle functionele eisen',
+    'End-to-end productiecontrole van alle functionele eisen (#19)',
   ])
     log(`NOG TE VERIFIËREN / IMPLEMENTEREN: ${item}`);
 

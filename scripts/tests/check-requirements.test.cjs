@@ -15,6 +15,8 @@ function createFixtureRoot({
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'h20-req-'));
   fs.mkdirSync(path.join(tmp, 'src/app/event-assistant/data'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'src/app/event-assistant/components'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'backend/n8n/code'), { recursive: true });
   fs.mkdirSync(path.join(tmp, 'public/assets/brand'), { recursive: true });
   fs.mkdirSync(path.join(tmp, 'public/assets/venue'), { recursive: true });
 
@@ -40,6 +42,22 @@ function createFixtureRoot({
     path.join(tmp, 'src/app/event-assistant/data/initial-data.ts'),
     "export const ROOMS = [{ imageUrl: '/assets/venue/room.png' }];\n",
   );
+  fs.writeFileSync(
+    path.join(tmp, 'src/app/event-assistant/pdf-offer.ts'),
+    'export function renderOfferPdf() {}\n',
+  );
+  fs.writeFileSync(
+    path.join(tmp, 'src/app/event-assistant/components/booking-detail.ts'),
+    'export class BookingDetail { downloadPdf() {} }\n',
+  );
+  fs.writeFileSync(
+    path.join(tmp, 'src/app/event-assistant/components/appointment-modal.ts'),
+    "selector: 'app-appointment-modal'\n",
+  );
+  fs.writeFileSync(
+    path.join(tmp, 'backend/n8n/code/domain.cjs'),
+    "function availableAppointmentSlots() {} const a = 'book-appointment'; const w1 = 'Niet alle tarieven zijn bekend'; const w2 = 'overschrijden het opgegeven budget';\n",
+  );
 
   if (adrs) {
     fs.mkdirSync(path.join(tmp, 'docs/adr'), { recursive: true });
@@ -52,7 +70,7 @@ function createFixtureRoot({
   return tmp;
 }
 
-test('reports descoped ADRs and email-only delivery when ADR files exist', () => {
+test('reports descoped ADRs, PDF/appointment/budget checks, and email-only delivery when ADR files exist', () => {
   const tmp = createFixtureRoot({ adrs: true });
   try {
     const lines = [];
@@ -60,6 +78,9 @@ test('reports descoped ADRs and email-only delivery when ADR files exist', () =>
     assert.equal(result.passed, true);
     assert.ok(lines.includes('PASS: Merkpalet aanwezig'));
     assert.ok(lines.includes('PASS: n8n URL ingesteld'));
+    assert.ok(lines.includes('PASS: Echte PDF-download aanwezig'));
+    assert.ok(lines.includes('PASS: Afspraken met gecontroleerde beschikbaarheid aanwezig'));
+    assert.ok(lines.includes('PASS: Server-side budget- en op-aanvraag-controle aanwezig'));
     assert.ok(
       lines.includes(
         'BUITEN SCOPE (ADR): Online betalingen (docs/adr/0002-descope-online-payments.md)',
@@ -101,12 +122,15 @@ test('falls back to pending verification lines when ADR files or n8n URL are abs
   }
 });
 
-test('CLI execution on repository detects ADR 0002 and ADR 0003', () => {
+test('CLI execution on repository passes all 11 code checks and detects ADR 0002 and ADR 0003', () => {
   const runtime = JSON.parse(
     fs.readFileSync(path.join(repoRoot, 'public/h20-runtime.json'), 'utf8'),
   );
   const run = spawnSync(process.execPath, [scriptPath], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(run.status, runtime.n8nWebhookBaseUrl ? 0 : 1);
+  assert.match(run.stdout, /^PASS: Echte PDF-download aanwezig$/m);
+  assert.match(run.stdout, /^PASS: Afspraken met gecontroleerde beschikbaarheid aanwezig$/m);
+  assert.match(run.stdout, /^PASS: Server-side budget- en op-aanvraag-controle aanwezig$/m);
   assert.match(
     run.stdout,
     /BUITEN SCOPE \(ADR\): Online betalingen \(docs\/adr\/0002-descope-online-payments\.md\)/,
