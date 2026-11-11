@@ -6,6 +6,7 @@ import { CurrencyPipe, DatePipe } from '@angular/common';
 import { filter, map } from 'rxjs';
 import { EventStore } from '../event-store';
 import {
+  Appointment,
   Booking,
   Room,
   CateringPackage,
@@ -55,7 +56,7 @@ export class Admin {
   readonly tabs = [
     { id: 'bookings', label: 'Alle aanvragen' },
     { id: 'calendar', label: 'Kalender' },
-    { id: 'availability', label: 'Beschikbaarheid' },
+    { id: 'availability', label: 'Beschikbaarheid & Afspraken' },
     { id: 'customers', label: 'Klanten' },
     { id: 'rooms', label: 'Zaalbeheer' },
     { id: 'catering', label: 'Catering & upgrades' },
@@ -63,6 +64,35 @@ export class Admin {
     { id: 'sources', label: 'Brongegevens' },
     { id: 'logs', label: 'Activiteitenlog' },
   ];
+  readonly sortedAppointments = computed(() =>
+    [...this.store.appointments()].sort((a, b) =>
+      `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`),
+    ),
+  );
+  staleAppointmentClaim(a: Appointment): boolean {
+    return (
+      a.claimStatus === 'claiming' &&
+      a.status !== 'cancelled' &&
+      a.status !== 'rejected' &&
+      !!a.claimCreatedAt &&
+      Date.now() - Date.parse(a.claimCreatedAt) > STALE_CLAIM_MS
+    );
+  }
+  appointmentStatusLabel(status: Appointment['status']): string {
+    switch (status) {
+      case 'confirmed':
+        return 'Bevestigd';
+      case 'cancelled':
+        return 'Geannuleerd';
+      case 'rejected':
+        return 'Afgewezen';
+      default:
+        return 'In afwachting';
+    }
+  }
+  changeAppointment(id: string, action: 'confirm' | 'cancel'): void {
+    void this.run(() => this.store.changeAppointmentStatus(id, action));
+  }
   /** A claim that never reached its final write (see docs/adr/0001-slot-claims.md). */
   staleClaim(b: Booking): boolean {
     return (

@@ -145,6 +145,8 @@
                   <div class="actions">
                     <button class="primary" (click)="openBuilder()">
                       Start een nieuw evenement →</button
+                    ><button type="button" (click)="appointmentOpen = true">
+                      Plan rondleiding / intake</button
                     ><button routerLink="/rooms">Bekijk alle mogelijkheden</button>
                   </div>
                 </div>
@@ -307,9 +309,14 @@
             <section class="panel">
               <h2>H20 Eventlocatie</h2>
               <p>Ontdek de ruimtes, gamingmogelijkheden en catering bij H20 in Purmerend.</p>
-              <a href="https://eventlocatie.h20.gg/" target="_blank" rel="noopener noreferrer"
-                >Officiële website ↗</a
-              >
+              <div class="actions">
+                <button type="button" (click)="appointmentOpen = true">
+                  Plan rondleiding / intake
+                </button>
+                <a href="https://eventlocatie.h20.gg/" target="_blank" rel="noopener noreferrer"
+                  >Officiële website ↗</a
+                >
+              </div>
             </section>
             <section class="panel">
               <h2>Van concept naar evenement</h2>
@@ -356,10 +363,16 @@
               <span class="eyebrow">JOUW EVENEMENTEN</span>
               <h1>Mijn voorstellen</h1>
               <p class="muted">
-                Bewaarde concepten en aanvragen uit deze {{ store.live() ? 'sessie' : 'browser' }}.
+                Bewaarde concepten, aanvragen en geplande afspraken uit deze
+                {{ store.live() ? 'sessie' : 'browser' }}.
               </p>
             </div>
-            <button class="primary" (click)="openBuilder()">+ Nieuw evenement</button>
+            <div class="actions">
+              <button type="button" (click)="appointmentOpen = true">
+                Plan rondleiding / intake
+              </button>
+              <button class="primary" (click)="openBuilder()">+ Nieuw evenement</button>
+            </div>
           </div>
           <div class="card-grid">
             @for (proposal of store.proposals(); track proposal.id) {
@@ -391,13 +404,32 @@
                 <button (click)="selectedBooking = b">Bekijk aanvraag</button>
               </article>
             }
+            @for (a of store.ownAppointments(); track a.id) {
+              <article class="panel" data-own-appointment>
+                <span class="status-pill">{{ appointmentStatusLabel(a.status) }}</span>
+                <h2>
+                  {{
+                    a.format === 'location_tour' ? 'Rondleiding op locatie' : 'Online intakegesprek'
+                  }}
+                </h2>
+                <p>{{ a.reference }}</p>
+                <p>{{ a.date | date: 'dd-MM-yyyy' }} · {{ a.startTime }}–{{ a.endTime }}</p>
+              </article>
+            }
           </div>
-          @if (!store.proposals().length && !store.ownBookings().length) {
+          @if (
+            !store.proposals().length &&
+            !store.ownBookings().length &&
+            !store.ownAppointments().length
+          ) {
             <section class="empty panel">
               <span class="empty-icon">▤</span>
               <h2>Jouw volgende evenement begint hier</h2>
               <p>Stel je eerste voorstel samen en bewaar het om later verder te gaan.</p>
               <button class="primary" (click)="openBuilder()">Start een evenement →</button>
+              <button type="button" (click)="appointmentOpen = true">
+                Plan rondleiding / intake
+              </button>
             </section>
           }
         }
@@ -543,4 +575,13 @@
       <button (click)="demoAdmin()">Open beheerdemo</button>
     }
   </app-modal>
+}
+@if (appointmentOpen) {
+  @defer {
+    <app-appointment-modal
+      (dismissed)="appointmentOpen = false"
+      (created)="appointmentCreated($event)"
+      (requestLogin)="appointmentOpen = false; login = true"
+    />
+  }
 }

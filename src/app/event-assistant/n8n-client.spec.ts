@@ -57,4 +57,28 @@ describe('n8n client', () => {
     await client.request('chat', { message: 'Hallo' });
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer test-token');
   });
+  it('omits Authorization header for public appointment-slots action and includes it for book-appointment', async () => {
+    const tokenSpy = vi.fn().mockResolvedValue('customer-jwt');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: AuthService, useValue: { token: tokenSpy } }],
+    });
+    const client = TestBed.inject(N8nClient);
+    client.configure('https://example.test/webhook/h20');
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ date: '2099-01-05', slots: [] }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await client.request('appointment-slots', { date: '2099-01-05' });
+    expect(tokenSpy).not.toHaveBeenCalled();
+    expect(fetchSpy.mock.calls[0][1].headers.Authorization).toBeUndefined();
+
+    await client.request('book-appointment', { date: '2099-01-05' });
+    expect(tokenSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[1][1].headers.Authorization).toBe('Bearer customer-jwt');
+  });
 });

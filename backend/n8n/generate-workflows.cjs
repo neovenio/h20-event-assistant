@@ -562,7 +562,7 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   workflow.nodes.push(
     code(
       'Access',
-      `${authSource}\nconst request=$input.first().json;return [{json:{route:${admin ? 'true' : "request.body?.action !== 'catalogue'"}?'verify':'public',clientKey:clientKeyFromHeaders(request.headers),body:request.body??{}}}];`,
+      `${authSource}\nconst request=$input.first().json;return [{json:{route:${admin ? 'true' : "!['catalogue','appointment-slots'].includes(request.body?.action)"}?'verify':'public',clientKey:clientKeyFromHeaders(request.headers),body:request.body??{}}}];`,
       -900,
       400,
     ),

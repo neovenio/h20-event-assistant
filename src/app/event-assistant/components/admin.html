@@ -149,6 +149,68 @@
   }
   @case ('availability') {
     <section class="panel">
+      <div class="section-heading">
+        <h2>Rondleidingen & intakegesprekken</h2>
+        <span class="badge">{{ store.appointments().length }} afspraken</span>
+      </div>
+      <div class="stack">
+        @for (appt of sortedAppointments(); track appt.id) {
+          <article class="panel section-heading" data-appointment>
+            <div>
+              <div class="actions">
+                <strong>{{ appt.reference }}</strong>
+                <span class="badge">{{
+                  appt.format === 'location_tour'
+                    ? 'Rondleiding op locatie'
+                    : 'Online intakegesprek'
+                }}</span>
+                <span class="status-pill">{{ appointmentStatusLabel(appt.status) }}</span>
+                @if (staleAppointmentClaim(appt)) {
+                  <span class="status-pill" data-indicator="incomplete">Onvolledige aanvraag</span>
+                }
+              </div>
+              <p>
+                {{ appt.date | date: 'dd-MM-yyyy' }} · {{ appt.startTime }}–{{ appt.endTime }} ·
+                {{ appt.customer.fullName }}
+                {{ appt.customer.company ? ' (' + appt.customer.company + ')' : '' }} ·
+                {{ appt.customer.email }}
+                {{ appt.customer.phone ? ' · ' + appt.customer.phone : '' }}
+              </p>
+              @if (appt.notes) {
+                <p class="muted">{{ appt.notes }}</p>
+              }
+            </div>
+            <div class="actions">
+              @if (appt.status === 'pending') {
+                <button
+                  type="button"
+                  class="primary"
+                  [attr.aria-label]="'Bevestigen ' + appt.reference"
+                  (click)="changeAppointment(appt.id, 'confirm')"
+                  [disabled]="busy"
+                >
+                  Bevestigen
+                </button>
+              }
+              @if (appt.status !== 'cancelled' && appt.status !== 'rejected') {
+                <button
+                  type="button"
+                  class="danger"
+                  [attr.aria-label]="'Annuleren ' + appt.reference"
+                  (click)="changeAppointment(appt.id, 'cancel')"
+                  [disabled]="busy"
+                >
+                  Annuleren
+                </button>
+              }
+            </div>
+          </article>
+        } @empty {
+          <p class="muted">Nog geen geplande rondleidingen of intakegesprekken.</p>
+        }
+      </div>
+    </section>
+    <section class="panel">
       <h2>Zaal blokkeren</h2>
       <form (ngSubmit)="createBlock()">
         <div class="form-grid">

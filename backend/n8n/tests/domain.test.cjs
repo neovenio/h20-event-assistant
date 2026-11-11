@@ -936,3 +936,286 @@ test('Workflow B enforces Firebase auth on chat and upserts rate-limit row befor
   assert.match(accessOut.clientKey, /^sha256:[0-9a-f]{64}$/);
   assert.ok(!JSON.stringify(accessOut).includes('198.51.100.42'));
 });
+
+// --- In-app appointments (#17) -----------------------------------------------------------
+function appointmentBody(overrides = {}) {
+  return {
+    action: 'book-appointment',
+    _identity: { uid: 'customer-1', email: 'klant@example.test' },
+    requestId: randomUUID(),
+    date: '2099-01-05', // Monday
+    startTime: '10:00',
+    endTime: '11:00',
+    format: 'location_tour',
+    customer: {
+      fullName: 'Sanne de Vries',
+      email: 'klant@example.test',
+      phone: '0612345678',
+      company: 'Studio Noord',
+    },
+    notes: 'Graag het Esports Stadium bekijken.',
+    ...overrides,
+  };
+}
+
+function savedAppointment(overrides = {}, existingRows = snapshot(), rowId = 41) {
+  const body = appointmentBody(overrides);
+  const claim = domain.publicAction(body, existingRows);
+  assert.equal(claim.route, 'claim');
+  assert.equal(claim.claimKind, 'appointment');
+  const withClaim = [...existingRows, ...domain.parseRows([inserted(claim.claimRow, rowId)])];
+  const settled = domain.settleClaim(claim, withClaim, rowId);
+  assert.equal(settled.route, 'save');
+  assert.equal(settled.status, 201);
+  const nextRows = [...existingRows, ...domain.parseRows([inserted(settled.write, rowId)])];
+  return { body, claim, settled, rows: nextRows };
+}
+
+test('appointment-slots returns 4 weekday slots, marks weekends/past unavailable, and leaks zero PII', () => {
+  assert.equal(new Date('2099-01-05T00:00:00Z').getUTCDay(), 1); // Monday
+  assert.equal(new Date('2099-01-03T00:00:00Z').getUTCDay(), 6); // Saturday
+  assert.equal(new Date('2099-01-04T00:00:00Z').getUTCDay(), 0); // Sunday
+
+  const monday = domain.publicAction(
+    { action: 'appointment-slots', date: '2099-01-05' },
+    snapshot(),
+  );
+  assert.equal(monday.route, 'respond');
+  assert.equal(monday.response.slots.length, 4);
+  assert.ok(monday.response.slots.every((s) => s.available));
+
+  for (const nonBookable of ['2099-01-03', '2099-01-04', '2020-01-06']) {
+    const res = domain.availableAppointmentSlots(snapshot(), nonBookable);
+    assert.equal(res.slots.length, 4);
+    assert.ok(
+      res.slots.every((s) => !s.available),
+      nonBookable,
+    );
+  }
+
+  for (const invalid of ['2099-02-31', 'not-a-date', '']) {
+    assert.throws(() => domain.availableAppointmentSlots(snapshot(), invalid), /geldige datum/);
+  }
+
+  const booked = savedAppointment({ startTime: '11:30', endTime: '12:30' });
+  const after = domain.publicAction(
+    { action: 'appointment-slots', date: '2099-01-05' },
+    booked.rows,
+  );
+  assert.deepEqual(
+    after.response.slots.map((s) => [s.startTime, s.available]),
+    [
+      ['10:00', true],
+      ['11:30', false],
+      ['14:00', true],
+      ['15:30', true],
+    ],
+  );
+  const serialized = JSON.stringify(after);
+  assert.ok(!serialized.includes('Sanne'));
+  assert.ok(!serialized.includes('klant@example.test'));
+  assert.ok(!serialized.includes('0612345678'));
+  assert.ok(!serialized.includes('AF-'));
+});
+
+test('Closure blocks make overlapping appointment slots unavailable, while room Maintenance blocks do not', () => {
+  const closureRow = inserted(
+    domain.row('block', 'closure-1', {
+      id: 'closure-1',
+      roomId: room.id,
+      roomName: room.name,
+      date: '2099-01-05',
+      startTime: '13:30',
+      endTime: '16:00',
+      reason: 'Locatie gesloten',
+      type: 'Closure',
+    }),
+    10,
+  );
+  const maintenanceRow = inserted(
+    domain.row('block', 'maint-1', {
+      id: 'maint-1',
+      roomId: room.id,
+      roomName: room.name,
+      date: '2099-01-05',
+      startTime: '10:00',
+      endTime: '11:00',
+      reason: 'Beamer onderhoud',
+      type: 'Maintenance',
+    }),
+    11,
+  );
+  const res = domain.availableAppointmentSlots(snapshot(closureRow, maintenanceRow), '2099-01-05');
+  assert.deepEqual(
+    res.slots.map((s) => [s.startTime, s.available]),
+    [
+      ['10:00', true],
+      ['11:30', true],
+      ['14:00', false],
+      ['15:30', false],
+    ],
+  );
+  assert.throws(
+    () =>
+      domain.publicAction(
+        appointmentBody({ startTime: '14:00', endTime: '15:00' }),
+        snapshot(closureRow),
+      ),
+    (err) => err.status === 409 && /niet meer beschikbaar/.test(err.message),
+  );
+});
+
+test('book-appointment enforces auth, validates inputs, prevents double-booking, and supports idempotent retries', () => {
+  assert.throws(
+    () => domain.publicAction(appointmentBody({ _identity: null }), snapshot()),
+    (err) => err.status === 401 && /Log eerst in/.test(err.message),
+  );
+  for (const invalid of [
+    { requestId: 'bad-id' },
+    { date: '2099-01-03' }, // Saturday
+    { date: '2020-01-06' }, // Past Monday
+    { startTime: '09:00', endTime: '10:00' },
+    { format: 'phone_call' },
+    { customer: { fullName: '', email: 'klant@example.test' } },
+    { customer: { fullName: 'Sanne', email: 'invalid-email' } },
+    { notes: 'x'.repeat(1001) },
+  ]) {
+    assert.throws(() => domain.publicAction(appointmentBody(invalid), snapshot()));
+  }
+
+  const first = savedAppointment();
+  assert.equal(
+    first.settled.response.appointment.reference,
+    `AF-${first.body.requestId.slice(0, 8).toUpperCase()}`,
+  );
+  assert.equal(first.settled.response.appointment.status, 'pending');
+  assert.equal(first.settled.response.appointment.claimStatus, undefined);
+
+  // Idempotent retry by same owner returns existing appointment
+  const retry = domain.publicAction(first.body, first.rows);
+  assert.equal(retry.route, 'respond');
+  assert.equal(retry.response.appointment.id, first.body.requestId);
+
+  // Different user with same requestId is rejected with 409
+  assert.throws(
+    () =>
+      domain.publicAction(
+        { ...first.body, _identity: { uid: 'other-user', email: 'other@example.test' } },
+        first.rows,
+      ),
+    (err) => err.status === 409,
+  );
+
+  // Double booking same slot with new requestId fails with 409
+  assert.throws(
+    () => domain.publicAction(appointmentBody(), first.rows),
+    (err) => err.status === 409 && /niet meer beschikbaar/.test(err.message),
+  );
+});
+
+test('two simultaneous appointment bookings for the same slot resolve race-safely via slot claims', () => {
+  const bodyA = appointmentBody({ _identity: { uid: 'user-a' } });
+  const bodyB = appointmentBody({ _identity: { uid: 'user-b' }, format: 'online_intake' });
+  const claimA = domain.publicAction(bodyA, snapshot());
+  const claimB = domain.publicAction(bodyB, snapshot());
+  const rowsBoth = snapshot(inserted(claimA.claimRow, 51), inserted(claimB.claimRow, 52));
+
+  const winA = domain.settleClaim(claimA, rowsBoth, 51);
+  const loseB = domain.settleClaim(claimB, rowsBoth, 52);
+  assert.equal(winA.route, 'save');
+  assert.equal(winA.status, 201);
+  assert.equal(JSON.parse(winA.write.payload).data.claimStatus, 'held');
+  assert.equal(loseB.route, 'lost');
+  assert.equal(loseB.status, 409);
+  assert.equal(loseB.deleteRowId, 52);
+  assert.match(loseB.response.error, /niet meer beschikbaar/);
+});
+
+test('my-requests scopes appointments to ownerUid and admin can confirm or cancel with conflict re-check', () => {
+  const apptA = savedAppointment({ _identity: { uid: 'owner-a' } }, snapshot(), 61);
+  const apptB = savedAppointment(
+    { _identity: { uid: 'owner-b' }, startTime: '14:00', endTime: '15:00' },
+    apptA.rows,
+    62,
+  );
+
+  const mineA = domain.publicAction(
+    { action: 'my-requests', _identity: { uid: 'owner-a' } },
+    apptB.rows,
+  );
+  assert.equal(mineA.response.appointments.length, 1);
+  assert.equal(mineA.response.appointments[0].id, apptA.body.requestId);
+  assert.equal(mineA.response.appointments[0].claimStatus, undefined);
+
+  const snap = domain.adminAction({ action: 'snapshot' }, apptB.rows);
+  assert.equal(snap.response.appointments.length, 2);
+
+  // Confirm appointment A
+  const confirmed = domain.adminAction(
+    { action: 'appointment-status', id: apptA.body.requestId, actionType: 'confirm' },
+    apptB.rows,
+  );
+  assert.equal(confirmed.route, 'save');
+  assert.equal(confirmed.response.appointment.status, 'confirmed');
+  assert.equal(JSON.parse(confirmed.write.payload).ownerUid, 'owner-a');
+
+  // If a Closure block is added on appointment B's slot before staff confirms B, confirm fails with 409
+  const closure = inserted(
+    domain.row('block', 'closure-b', {
+      id: 'closure-b',
+      roomId: room.id,
+      roomName: room.name,
+      date: '2099-01-05',
+      startTime: '14:00',
+      endTime: '15:00',
+      reason: 'Sluiting',
+      type: 'Closure',
+    }),
+    63,
+  );
+  const withClosure = [
+    ...apptB.rows.filter((r) => r.recordId !== `appointment:${apptA.body.requestId}`),
+    ...domain.parseRows([inserted(confirmed.write, 61), closure]),
+  ];
+  assert.throws(
+    () =>
+      domain.adminAction(
+        { action: 'appointment-status', id: apptB.body.requestId, actionType: 'confirm' },
+        withClosure,
+      ),
+    (err) => err.status === 409 && /overlapt/.test(err.message),
+  );
+
+  // Cancelling appointment A frees its 10:00-11:00 slot
+  const cancelled = domain.adminAction(
+    { action: 'appointment-status', id: apptA.body.requestId, actionType: 'cancel' },
+    withClosure,
+  );
+  assert.equal(cancelled.response.appointment.status, 'cancelled');
+  const afterCancel = [
+    ...apptB.rows.filter((r) => r.recordId !== `appointment:${apptA.body.requestId}`),
+    ...domain.parseRows([inserted(cancelled.write, 61)]),
+  ];
+  const slotsAfterCancel = domain.availableAppointmentSlots(afterCancel, '2099-01-05');
+  assert.equal(slotsAfterCancel.slots.find((s) => s.startTime === '10:00').available, true);
+  const snapAfter = domain.adminAction({ action: 'snapshot' }, afterCancel);
+  assert.ok(snapAfter.response.logs.some((l) => l.action === 'Afspraak geannuleerd'));
+});
+
+test('public workflow allows appointment-slots without auth while keeping book-appointment verified', () => {
+  const wf = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../workflows/B-public-api-and-proposals.json'), 'utf8'),
+  );
+  const accessNode = wf.nodes.find((n) => n.name === 'Access');
+  const runAccess = new vm.Script(
+    `(function($input){ ${accessNode.parameters.jsCode} })`,
+  ).runInNewContext();
+  assert.equal(
+    runAccess({ first: () => ({ json: { body: { action: 'appointment-slots' } } }) })[0].json.route,
+    'public',
+  );
+  assert.equal(
+    runAccess({ first: () => ({ json: { body: { action: 'book-appointment' } } }) })[0].json.route,
+    'verify',
+  );
+});
