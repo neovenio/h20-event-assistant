@@ -113,25 +113,38 @@ function claimShape(item) {
     };
   return null;
 }
+const validId = (id) => id != null && id !== '' && Number.isFinite(Number(id));
+/** A competing claim without a usable id might be older than ours, so it ranks first (blocks us). */
+const rivalRank = (id) => (validId(id) ? Number(id) : -Infinity);
 /**
  * Reserve-first protocol: among the active claims overlapping `claim` (plus the claim itself) the
- * one with the lowest Data Table row id wins. Pure and order independent. Rows that predate system
- * column capture have no id and rank first: they were saved before any claim could race them.
+ * one with the lowest Data Table row id wins. Pure and order independent. Fails closed: a claim
+ * without its own system id never wins.
  */
 function resolveClaim(rows, claim) {
-  const rank = (id) => (Number.isFinite(Number(id)) && id != null ? Number(id) : 0);
+  if (!validId(claim.rowId)) return { won: false, winnerId: null };
+  const own = Number(claim.rowId);
   const rivals = rows
     .map(claimShape)
     .filter(
       (other) =>
         other &&
-        other.rowId !== claim.rowId &&
+        (!validId(other.rowId) || Number(other.rowId) !== own) &&
         other.date === claim.date &&
         other.roomIds.some((id) => claim.roomIds.includes(id)) &&
         overlaps(claim.startTime, claim.endTime, other.startTime, other.endTime),
     );
-  const winnerId = Math.min(rank(claim.rowId), ...rivals.map((other) => rank(other.rowId)));
-  return { won: winnerId === rank(claim.rowId), winnerId };
+  const winnerId = Math.min(own, ...rivals.map((other) => rivalRank(other.rowId)));
+  return { won: winnerId === own, winnerId: Number.isFinite(winnerId) ? winnerId : null };
+}
+/** A transient duplicate recordId (double submit) is read as its lowest-id row. */
+function dedupe(rows) {
+  const best = new Map();
+  for (const item of rows) {
+    const current = best.get(item.recordId);
+    if (!current || rivalRank(item.rowId) < rivalRank(current.rowId)) best.set(item.recordId, item);
+  }
+  return rows.filter((item) => best.get(item.recordId) === item);
 }
 function hasConflict(rows, ids, date, start, end, except = '') {
   return (
@@ -438,30 +451,42 @@ function requestContext(body, rows, validated, booking, route) {
     ),
   };
 }
-function lostClaim(own) {
+function lostClaim(rowId) {
   return {
     route: 'lost',
     status: 409,
-    deleteRecordId: own.recordId,
+    deleteRowId: Number(rowId),
     response: { error: 'Deze datum of tijd overlapt een aanvraag of blokkade.' },
   };
 }
 /** A retry that finds its own claim still 'claiming' verifies again instead of trusting it. */
 function reverifyRequest(body, rows, existing) {
   const claim = claimShape(existing);
-  if (!resolveClaim(rows, claim).won) return lostClaim(existing);
+  if (!validId(existing.rowId))
+    fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
+  if (!resolveClaim(rows, claim).won) return lostClaim(existing.rowId);
   // Own and rival claims are excluded: the conflict check already ran when the claim was inserted.
   const catalogueRows = rows.filter((r) => r.kind !== 'booking' && r.kind !== 'block');
   const validated = validateRequest(body, catalogueRows);
   return requestContext(body, catalogueRows, validated, existing.data, 'gemini');
 }
-/** Second half of the reserve-first protocol; `rows` must be a fresh read that includes the claim row. */
-function settleClaim(context, rows) {
-  const own = rows.find((r) => r.recordId === context.claimRow.recordId);
-  if (!own) fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
-  const claim =
-    claimShape(own) ?? claimShape({ ...own, data: JSON.parse(context.claimRow.payload).data });
-  if (!resolveClaim(rows, { ...claim, rowId: own.rowId }).won) return lostClaim(own);
+/**
+ * Second half of the reserve-first protocol. `rows` is a fresh read that includes the claim row and
+ * `ownRowId` is the system id returned by our own insert (never rediscovered by recordId, which a
+ * double submit can duplicate).
+ */
+function settleClaim(context, rows, ownRowId) {
+  if (!validId(ownRowId)) {
+    // Fail closed. Only delete when the row is unambiguous, otherwise we could remove a rival.
+    const same = rows.filter((r) => r.recordId === context.claimRow.recordId);
+    const error = { error: 'De reservering kon niet worden bevestigd. Probeer opnieuw.' };
+    return same.length === 1 && validId(same[0].rowId)
+      ? { route: 'lost', status: 503, deleteRowId: Number(same[0].rowId), response: error }
+      : { route: 'respond', status: 503, response: error };
+  }
+  const data = JSON.parse(context.claimRow.payload).data;
+  const claim = claimShape({ kind: context.claimKind, data, rowId: ownRowId });
+  if (!resolveClaim(rows, claim).won) return lostClaim(ownRowId);
   if (context.claimKind === 'block') {
     const parsed = JSON.parse(context.claimRow.payload);
     const held = { ...parsed, data: { ...parsed.data, claimStatus: 'held' } };
@@ -473,7 +498,8 @@ function settleClaim(context, rows) {
   }
   return { ...context, route: 'gemini' };
 }
-function publicAction(body, rows) {
+function publicAction(body, allRows) {
+  const rows = dedupe(allRows);
   if (body.action === 'my-requests') {
     if (!body._identity?.uid) fail('Log eerst in.', 401);
     return response({
@@ -498,7 +524,7 @@ function publicAction(body, rows) {
       if (existing.ownerUid !== body._identity.uid) fail('Ongeldige aanvraagreferentie.', 409);
       if (existing.customerToken !== body.customerToken) fail('Ongeldige aanvraagreferentie.', 409);
       if (claimStatusOf(existing.data) === 'claiming' && isActiveBooking(existing.data))
-        return reverifyRequest(body, rows, existing);
+        return reverifyRequest(body, allRows, existing);
       return response({ booking: publicBooking(existing.data) });
     }
     const validated = validateRequest(body, rows);
@@ -534,6 +560,13 @@ function parseGenerated(result) {
   return JSON.parse(raw);
 }
 function validProposal(context, generated) {
+  try {
+    return checkProposal(context, generated);
+  } catch {
+    return false; // malformed shapes (null items, wrong types) count as invalid output
+  }
+}
+function checkProposal(context, generated) {
   if (
     !text(generated.explanation, 12000) ||
     !Array.isArray(generated.planning) ||
@@ -621,7 +654,8 @@ function audit(entry, action, previousValue = '', newValue = '') {
     ],
   };
 }
-function adminAction(body, rows) {
+function adminAction(body, allRows) {
+  const rows = dedupe(allRows);
   if (body.action === 'session') return response({ authenticated: true });
   if (body.action === 'snapshot')
     return response({
@@ -651,6 +685,8 @@ function adminAction(body, rows) {
         fail('Deze aanvraag is afgesloten.', 409);
       if (!['approve', 'reject', 'cancel'].includes(body.actionType)) fail('Ongeldige status.');
       if (body.actionType === 'approve') {
+        if (claimStatusOf(b) === 'claiming')
+          fail('Deze aanvraag wordt nog verwerkt. Probeer het later opnieuw.', 409);
         if (aiStatusOf(b) === 'failed' && !text(b.explanation))
           fail('Voeg eerst een uitleg toe voordat je deze aanvraag goedkeurt.', 409);
         if (

@@ -176,7 +176,7 @@ function apiWorkflow(admin) {
     ),
   );
   // Reserve first, verify after: insert the claim row, re-read everything, lowest Data Table row id wins.
-  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');if($('Insert claim').all().some(item=>item.json.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);return [{json:settleClaim($('Route request').first().json,parseRows(items))}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
+  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');if($('Insert claim').all().some(item=>item.json.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);return [{json:settleClaim($('Route request').first().json,parseRows(items),$('Insert claim').first().json.id)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   const routing = `${domain}\ntry { const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const body=$('Webhook').first().json.body??{};if(JSON.stringify(body).length>25000)fail('Verzoek is te groot.',413);return [{json:${admin ? 'adminAction' : 'publicAction'}(body,parseRows(items))}]; }catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   nodes.push(code('Route request', routing, 440));
   nodes.push(check('Needs claim', 'claim', 660, 160));
@@ -255,16 +255,17 @@ function apiWorkflow(admin) {
         filters: {
           conditions: [
             {
-              keyName: 'recordId',
+              keyName: 'id',
               condition: 'eq',
-              keyValue: '={{ $("Result").first().json.deleteRecordId }}',
+              keyValue: '={{ $("Result").first().json.deleteRowId }}',
             },
           ],
         },
       },
       offset,
       260,
-      { onError: 'continueRegularOutput' },
+      // deleteRows outputs nothing when no row matches; the webhook must still be answered.
+      { onError: 'continueRegularOutput', alwaysOutputData: true },
     ),
   );
   // A failed delete still answers 409: the leftover claiming row errs on the cautious side.

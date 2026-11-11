@@ -47,6 +47,8 @@ export class Admin {
   staleClaim(b: Booking): boolean {
     return (
       b.claimStatus === 'claiming' &&
+      b.requestStatus !== 'rejected' &&
+      !['Cancelled', 'Refunded', 'Draft'].includes(b.reservation.bookingStatus) &&
       !!b.claimCreatedAt &&
       Date.now() - Date.parse(b.claimCreatedAt) > STALE_CLAIM_MS
     );

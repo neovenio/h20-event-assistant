@@ -342,7 +342,12 @@ const claimBlock = (change = {}) =>
     },
     snapshot(),
   );
-const outcome = (context, rows) => domain.settleClaim(context, rows);
+const outcome = (context, rows, id) =>
+  domain.settleClaim(
+    context,
+    rows,
+    id ?? rows.find((r) => r.recordId === context.claimRow.recordId)?.rowId,
+  );
 
 test('a new request claims the slot first, as claiming, before any AI call', () => {
   const { context } = claimRequest();
@@ -376,7 +381,7 @@ test('two overlapping requests: exactly one wins (lowest row id), whatever the e
     const lost = results.find((r) => r.route === 'lost');
     assert.equal(lost.status, 409);
     assert.match(lost.response.error, /overlapt/);
-    assert.equal(lost.deleteRecordId, `booking:${b.body.requestId}`);
+    assert.equal(lost.deleteRowId, 12);
   }
 });
 
@@ -513,7 +518,7 @@ test('retry with a claiming row re-verifies: it wins and proceeds, or loses, del
   );
   assert.equal(lost.route, 'lost');
   assert.equal(lost.status, 409);
-  assert.equal(lost.deleteRecordId, `booking:${mine.body.requestId}`);
+  assert.equal(lost.deleteRowId, 20);
 });
 
 test('retry that finds a held row returns the receipt as before', () => {
@@ -581,6 +586,12 @@ test('B and C workflows wire claim insert, re-read, settle and delete-on-loss', 
     assert.equal(byName['Insert claim'].parameters.operation, 'insert');
     assert.equal(byName['Re-read records after claim'].parameters.operation, 'get');
     assert.equal(byName['Delete lost claim'].parameters.operation, 'deleteRows');
+    assert.equal(byName['Delete lost claim'].alwaysOutputData, true);
+    assert.equal(byName['Delete lost claim'].parameters.filters.conditions[0].keyName, 'id');
+    assert.match(
+      byName['Settle claim'].parameters.jsCode,
+      /\$\('Insert claim'\)\.first\(\)\.json\.id/,
+    );
     assert.match(byName['Settle claim'].parameters.jsCode, /settleClaim/);
     assert.deepEqual(next('Route request'), ['Needs claim']);
     assert.deepEqual(next('Needs claim', 0), ['Write claim']);
@@ -594,4 +605,81 @@ test('B and C workflows wire claim insert, re-read, settle and delete-on-loss', 
     assert.deepEqual(next('Delete lost claim'), ['After lost claim']);
     assert.deepEqual(next('After lost claim'), ['Respond']);
   }
+});
+
+test('a claim without a system id fails closed and never wins', () => {
+  const a = claimRequest();
+  const b = claimRequest();
+  // both rows come back without ids (e.g. an insert/get that dropped them)
+  const idless = (c) => ({ ...c.context.claimRow });
+  const rowsBoth = snapshot(idless(a), idless(b));
+  for (const c of [a, b]) {
+    const result = domain.settleClaim(c.context, rowsBoth, undefined);
+    assert.notEqual(result.route, 'gemini');
+    assert.equal(result.status, 503);
+  }
+  // a rival without an id blocks us instead of ranking behind us
+  const mine = claimRequest();
+  const rival = idless(a);
+  const mixed = snapshot(rival, inserted(mine.context.claimRow, 5));
+  assert.equal(domain.settleClaim(mine.context, mixed, 5).route, 'lost');
+  // resolveClaim itself refuses an id-less own claim
+  assert.equal(
+    domain.resolveClaim(rowsBoth, {
+      rowId: undefined,
+      roomIds: [room.id],
+      date: '2099-12-15',
+      startTime: '10:00',
+      endTime: '16:00',
+    }).won,
+    false,
+  );
+});
+
+test('a same-requestId double submit: one winner, the loser deletes only its own row id', () => {
+  const { body, context } = claimRequest();
+  const first = inserted(context.claimRow, 31);
+  const second = inserted(context.claimRow, 32);
+  const rowsBoth = snapshot(first, second);
+  const winner = outcome(context, rowsBoth, 31);
+  const loser = outcome(context, rowsBoth, 32);
+  assert.equal(winner.route, 'gemini');
+  assert.equal(loser.route, 'lost');
+  assert.equal(loser.deleteRowId, 32);
+  // while both rows exist, a retry sees the lowest id and staff see one booking
+  const retry = domain.publicAction(body, rowsBoth);
+  assert.equal(retry.route, 'gemini');
+  assert.equal(domain.adminAction({ action: 'snapshot' }, rowsBoth).response.bookings.length, 1);
+  // after the loser deleted itself and the winner saved, the retry returns the receipt
+  const saved = domain.finishGemini(winner, generated(winner));
+  const receipt = domain.publicAction(body, snapshot(inserted(saved.write, 31)));
+  assert.equal(receipt.route, 'respond');
+  assert.equal(receipt.response.booking.id, body.requestId);
+});
+
+test('malformed Gemini output keeps the hold with aiStatus failed', () => {
+  const { context } = claimRequest();
+  for (const generatedValue of [
+    { explanation: 'x', planning: [null] },
+    null,
+    { explanation: 'x', planning: 'nope' },
+  ]) {
+    const done = domain.finishGemini(context, {
+      candidates: [{ content: { parts: [{ text: JSON.stringify(generatedValue) }] } }],
+    });
+    assert.equal(done.route, 'save');
+    assert.equal(JSON.parse(done.write.payload).data.aiStatus, 'failed');
+  }
+});
+
+test('staff cannot approve a booking that is still claiming', () => {
+  const { context, body } = claimRequest();
+  assert.throws(
+    () =>
+      domain.adminAction(
+        { action: 'booking-status', id: body.requestId, actionType: 'approve' },
+        snapshot(inserted(context.claimRow, 8)),
+      ),
+    /verwerkt/,
+  );
 });

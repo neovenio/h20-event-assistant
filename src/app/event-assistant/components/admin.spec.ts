@@ -47,6 +47,11 @@ describe('admin booking list claim indicators', () => {
       row('stale', { claimStatus: 'claiming', claimCreatedAt: ago(11) }),
       row('fresh', { claimStatus: 'claiming', claimCreatedAt: ago(2) }),
       row('held', { claimStatus: 'held', claimCreatedAt: ago(60) }),
+      row('rejected', {
+        claimStatus: 'claiming',
+        claimCreatedAt: ago(60),
+        requestStatus: 'rejected',
+      }),
     ]);
     const flagged = el.querySelectorAll('[data-indicator="incomplete"]');
     expect(flagged.length).toBe(1);
