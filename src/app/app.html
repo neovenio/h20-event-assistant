@@ -1,16 +1,18 @@
 <a class="skip-link" href="#main-content">Naar inhoud</a>
 <div class="app-shell" [class.nav-collapsed]="collapsed()">
   <aside class="sidebar" [class.mobile-open]="mobile()">
-    <button class="brand" (click)="navigate('dashboard')" aria-label="H20 dashboard">
+    <button class="brand" routerLink="/" (click)="mobile.set(false)" aria-label="H20 dashboard">
       <img src="/assets/brand/h20-logo.png" alt="H20 Event Locatie" />
     </button>
     <p class="brand-caption">AI EVENT ASSISTANT</p>
     <nav aria-label="Hoofdnavigatie">
       @for (item of navigation; track item.id) {
         <button
-          [class.active]="tab() === item.id"
-          (click)="navigate(item.id)"
-          [attr.aria-current]="tab() === item.id ? 'page' : null"
+          [routerLink]="'/' + path[item.id]"
+          routerLinkActive="active"
+          [routerLinkActiveOptions]="{ exact: item.id === 'dashboard' }"
+          ariaCurrentWhenActive="page"
+          (click)="mobile.set(false)"
         >
           <app-icon [name]="item.id" /><span class="nav-label">{{ item.label }}</span>
           @if (item.id === 'event-builder') {
@@ -19,7 +21,12 @@
         </button>
       }
       @if (admin()) {
-        <button [class.active]="tab() === 'admin'" (click)="navigate('admin')">
+        <button
+          routerLink="/admin"
+          routerLinkActive="active"
+          ariaCurrentWhenActive="page"
+          (click)="mobile.set(false)"
+        >
           <app-icon name="admin" /><span class="nav-label">Medewerkers</span>
         </button>
       }
@@ -96,7 +103,7 @@
           }
         </div>
       }
-      @switch (tab()) {
+      @switch (page()) {
         @case ('dashboard') {
           <div class="dashboard-grid">
             <div class="dashboard-main">
@@ -138,7 +145,7 @@
                   <div class="actions">
                     <button class="primary" (click)="openBuilder()">
                       Start een nieuw evenement →</button
-                    ><button (click)="navigate('rooms')">Bekijk alle mogelijkheden</button>
+                    ><button routerLink="/rooms">Bekijk alle mogelijkheden</button>
                   </div>
                 </div>
               </section>
@@ -165,9 +172,7 @@
               <section>
                 <div class="section-heading">
                   <h2>Onze zalen en ruimtes</h2>
-                  <button class="text-button" (click)="navigate('rooms')">
-                    Alle zalen vergelijken →
-                  </button>
+                  <button class="text-button" routerLink="/rooms">Alle zalen vergelijken →</button>
                 </div>
                 <div class="card-grid dashboard-rooms">
                   @for (room of store.activeRooms().slice(0, 4); track room.id) {
@@ -205,7 +210,7 @@
                   <li>Catering op maat</li>
                   <li>Persoonlijke begeleiding</li>
                 </ul>
-                <button class="text-button" (click)="navigate('knowledge')">Ontdek H20 →</button>
+                <button class="text-button" routerLink="/knowledge">Ontdek H20 →</button>
               </section>
             </aside>
           </div>
@@ -396,6 +401,7 @@
         @case ('admin') {
           @if (admin()) {
             <app-admin
+              [section]="adminSection()"
               (selectBooking)="selectedBooking = $event"
               (newBooking)="openBuilder()"
               (logout)="logout()"
@@ -417,13 +423,13 @@
 <button class="floating-ai primary" (click)="chat = true" aria-label="AI Planning Studio openen">
   ✦ <span>AI Assistent</span>
 </button>
-@if (builder) {
+@if (builder()) {
   <app-event-builder
     [initial]="builderConfig"
     [proposalId]="editingProposalId"
-    (dismissed)="builder = false"
+    (dismissed)="closeBuilder()"
     (book)="startBooking($event)"
-    (saved)="builder = false; tab.set('my-proposals'); notice = 'Concept bewaard.'"
+    (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
   />
 }
 @if (bookingConfig) {

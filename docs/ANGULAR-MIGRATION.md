@@ -25,7 +25,7 @@ The existing `angular.json`, all TypeScript configuration files, `package.json`,
 
 `src/index.html` now has a Dutch language attribute, a product title and a description. `src/app/app.spec.ts` now tests the real app instead of the generated Angular welcome screen.
 
-The current Angular configuration prerenders `/` and also builds a server bundle. The existing Firebase workflow deploys only the browser output. Therefore Firebase serves prerendered HTML; request-time SSR would require a server deployment change, which this migration does not make. Tab navigation stays on `/`, so it works with the existing Hosting configuration without additional rewrites.
+The current Angular configuration prerenders every public route (`/`, `/plan`, `/my-proposals`, `/knowledge`, `/rooms`, `/activities`, `/catering`) and also builds a server bundle. The existing Firebase workflow deploys only the browser output. Therefore Firebase serves prerendered HTML; request-time SSR would require a server deployment change, which this migration does not make. Pages are Angular Router routes. `/admin/**` is client-rendered (it needs a signed-in staff session) and Firebase Hosting rewrites every path without a static file to `/index.csr.html`, so hard refreshes and deep links work.
 
 ## Running locally
 

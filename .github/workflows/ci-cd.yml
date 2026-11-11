@@ -100,6 +100,9 @@ jobs:
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
+      - name: Write dev runtime config
+        run: node scripts/write-runtime-config.cjs dev
+
       - name: Deploy to Firebase Dev
         run: npx firebase-tools deploy --only hosting --project h20-event-assistant-dev
 
@@ -128,6 +131,9 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
+      - name: Write prod runtime config
+        run: node scripts/write-runtime-config.cjs prod
 
       - name: Deploy to Firebase Production
         run: npx firebase-tools deploy --only hosting --project h20-event-assistant-prod

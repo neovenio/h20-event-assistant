@@ -1,6 +1,18 @@
 import { AuthService } from './event-assistant/auth-service';
-import { Component, afterNextRender, inject, signal } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { filter, map } from 'rxjs';
+import { ADMIN_SECTIONS, PAGE_PATHS, pageForPath } from './app.routes';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { EventStore } from './event-assistant/event-store';
 import { Booking, EventConfiguration, Room } from './event-assistant/models';
@@ -25,6 +37,8 @@ import { Admin } from './event-assistant/components/admin';
     Assistant,
     Admin,
     Icon,
+    RouterLink,
+    RouterLinkActive,
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -35,10 +49,29 @@ export class App {
   authPassword = '';
   registering = false;
   readonly store = inject(EventStore);
-  readonly tab = signal('dashboard');
+  private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly url = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      map(() => this.router.url),
+    ),
+    { initialValue: this.router.url },
+  );
+  private readonly urlTree = computed(() => this.router.parseUrl(this.url()));
+  private readonly segments = computed(() =>
+    (this.urlTree().root.children['primary']?.segments ?? []).map((segment) => segment.path),
+  );
+  readonly tab = computed(() => pageForPath(this.segments()[0]));
+  readonly adminSection = computed(() => this.segments()[1] ?? ADMIN_SECTIONS[0]);
+  /** The page rendered behind the event builder, which opens as an overlay on /plan. */
+  readonly page = computed(() => (this.tab() === 'event-builder' ? 'dashboard' : this.tab()));
   readonly mobile = signal(false);
   readonly collapsed = signal(false);
-  readonly admin = signal(false);
+  readonly admin = computed(
+    () => this.auth.staff() || (!this.store.live() && this.auth.demoStaff()),
+  );
+  readonly path = PAGE_PATHS;
   readonly navigation = [
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
     { id: 'event-builder', label: 'Event Builder', icon: '＋' },
@@ -47,8 +80,8 @@ export class App {
     { id: 'rooms', label: 'Zalen', icon: '▥' },
     { id: 'activities', label: 'Activiteiten', icon: '⌘' },
     { id: 'catering', label: 'Catering', icon: '♧' },
-  ];
-  builder = false;
+  ] as const;
+  readonly builder = signal(false);
   editingProposalId: string | null = null;
   builderConfig: EventConfiguration | null = null;
   bookingConfig: EventConfiguration | null = null;
@@ -63,7 +96,33 @@ export class App {
   roomQuery = '';
   minCapacity = 0;
   receipt = '';
+  private builderRequested = false;
+  private receiptReady = false;
+  private openedReceipt = '';
   constructor() {
+    effect(() => {
+      if (this.tab() === 'event-builder') {
+        // Entering /plan without openBuilder() (nav link, back/forward) starts a fresh concept.
+        if (!this.builderRequested) this.resetBuilderState();
+        this.builderRequested = false;
+        this.builder.set(true);
+      } else {
+        this.builder.set(false);
+        this.bookingConfig = null;
+        this.builderRequested = false;
+        this.resetBuilderState();
+      }
+    });
+    effect(() => {
+      if (!this.auth.accessDenied()) return;
+      this.auth.accessDenied.set(false);
+      if (this.auth.user()) this.notice = 'Je hebt geen toegang tot het medewerkersportaal.';
+      else this.login = true;
+      this.cdr.markForCheck();
+    });
+    this.router.events
+      .pipe(filter((event) => event instanceof NavigationEnd))
+      .subscribe(() => void this.openReceipt());
     afterNextRender(async () => {
       try {
         await this.auth.restore();
@@ -71,28 +130,35 @@ export class App {
           const result = await this.store.api.request<{ bookings: Booking[] }>('my-requests');
           this.store.bookings.set(result.bookings);
           this.store.ownBookingIds.set(result.bookings.map((b) => b.id));
+          // A hard refresh on /admin restores the staff session; load the staff data too.
+          if (this.auth.staff()) await this.store.refreshAdmin();
         }
       } catch {
         /* Missing configuration keeps the local demo available. */
       }
 
-      const params = new URLSearchParams(location.hash.slice(1));
-      const id = params.get('request');
-      const token = params.get('token');
-      if (id && token) {
-        try {
-          const response = await fetch('/h20-runtime.json');
-          const config = await response.json();
-          if (!config.n8nWebhookBaseUrl)
-            throw new Error('De n8n-verbinding is nog niet ingesteld.');
-          this.store.api.configure(config.n8nWebhookBaseUrl);
-          this.selectedBooking = await this.store.lookup(id, token);
-        } catch (error) {
-          this.notice =
-            error instanceof Error ? error.message : 'De aanvraag kon niet worden geopend.';
-        }
-      }
+      this.receiptReady = true;
+      await this.openReceipt();
     });
+  }
+  /** Private receipts travel in the URL fragment only; it never reaches server logs. */
+  private async openReceipt(): Promise<void> {
+    if (!this.receiptReady) return;
+    const params = new URLSearchParams(this.router.parseUrl(this.router.url).fragment ?? '');
+    const id = params.get('request');
+    const token = params.get('token');
+    if (!id || !token || this.openedReceipt === `${id}#${token}`) return;
+    this.openedReceipt = `${id}#${token}`;
+    try {
+      const response = await fetch('/h20-runtime.json');
+      const config = await response.json();
+      if (!config.n8nWebhookBaseUrl) throw new Error('De n8n-verbinding is nog niet ingesteld.');
+      this.store.api.configure(config.n8nWebhookBaseUrl);
+      this.selectedBooking = await this.store.lookup(id, token);
+    } catch (error) {
+      this.notice = error instanceof Error ? error.message : 'De aanvraag kon niet worden geopend.';
+    }
+    this.cdr.markForCheck();
   }
   get visibleRooms(): Room[] {
     return this.store
@@ -103,16 +169,27 @@ export class App {
           (!this.minCapacity || !room.maxCapacity || room.maxCapacity >= this.minCapacity),
       );
   }
-  navigate(id: string): void {
-    this.mobile.set(false);
-    if (id === 'event-builder') this.openBuilder();
-    else this.tab.set(id);
-  }
   openBuilder(config: EventConfiguration | null = null, proposalId: string | null = null): void {
     this.editingProposalId = proposalId;
     this.builderConfig = config;
-    this.builder = true;
+    this.builderRequested = true;
+    this.builder.set(true);
     this.chat = false;
+    void this.router.navigateByUrl('/' + PAGE_PATHS['event-builder']);
+  }
+  private resetBuilderState(): void {
+    this.editingProposalId = null;
+    this.builderConfig = null;
+  }
+  closeBuilder(): void {
+    this.resetBuilderState();
+    this.builder.set(false);
+    if (this.tab() === 'event-builder') void this.router.navigateByUrl('/');
+  }
+  go(path: string, notice?: string): void {
+    this.mobile.set(false);
+    if (notice !== undefined) this.notice = notice;
+    void this.router.navigateByUrl(path);
   }
   bookRoom(room: Room): void {
     this.selectedRoom = null;
@@ -123,19 +200,19 @@ export class App {
     });
   }
   startBooking(config: EventConfiguration): void {
-    this.builder = false;
+    this.builder.set(false);
     this.bookingConfig = config;
   }
   created(booking: Booking): void {
     this.bookingConfig = null;
-    this.tab.set('my-proposals');
+    void this.router.navigateByUrl('/' + PAGE_PATHS['my-proposals']);
     this.notice = this.store.live()
       ? 'Je aanvraag is ontvangen en wacht op beoordeling. Bewaar je persoonlijke link hieronder.'
       : 'Je demoaanvraag is in deze browser opgeslagen. Er is niets verzonden.';
     this.receipt = this.store.live() ? this.store.receiptLink(booking.id) : '';
   }
   async signIn(): Promise<void> {
-    this.admin.set(false);
+    this.auth.demoStaff.set(false);
     if (this.store.live()) {
       this.store.bookings.set([]);
       this.store.ownBookingIds.set([]);
@@ -147,7 +224,7 @@ export class App {
       else await this.auth.signIn(this.authEmail, this.authPassword);
       this.authPassword = '';
       this.login = false;
-      this.tab.set('my-proposals');
+      void this.router.navigateByUrl('/' + PAGE_PATHS['my-proposals']);
       if (this.store.live()) {
         const result = await this.store.api.request<{ bookings: Booking[] }>('my-requests');
         this.store.bookings.set(result.bookings);
@@ -155,8 +232,7 @@ export class App {
       }
       if (this.auth.staff() && this.store.live()) {
         await this.store.refreshAdmin();
-        this.admin.set(true);
-        this.tab.set('admin');
+        void this.router.navigateByUrl('/' + PAGE_PATHS.admin);
       }
     } catch {
       this.loginError =
@@ -178,14 +254,14 @@ export class App {
     }
   }
   demoAdmin(): void {
-    this.admin.set(true);
+    this.auth.demoStaff.set(true);
     this.login = false;
-    this.tab.set('admin');
+    void this.router.navigateByUrl('/' + PAGE_PATHS.admin);
   }
   logout(): void {
     void this.auth.logout();
     this.store.logout();
-    this.admin.set(false);
-    this.tab.set('dashboard');
+    this.auth.demoStaff.set(false);
+    void this.router.navigateByUrl('/');
   }
 }

@@ -42,3 +42,10 @@ CI (`.github/workflows/ci-cd.yml`) runs format, lint, test and build. Pushing to
 - [Angular migration notes](docs/ANGULAR-MIGRATION.md)
 - [n8n backend README](backend/n8n/README.md)
 - [Issue tracker contract](docs/agents/issue-tracker.md)
+
+## Runtime config per environment
+
+The app reads public config from `/h20-runtime.json` (`{ n8nWebhookBaseUrl, firebase }`). Per-environment values are committed in `config/runtime/dev.json` and `config/runtime/prod.json`. Each deploy job runs `node scripts/write-runtime-config.cjs <dev|prod>`, which overwrites `h20-runtime.json` in the build output before `firebase deploy`. No secrets are involved. The script and `npm run test:config` reject any key other than `n8nWebhookBaseUrl` and the public Firebase web config fields.
+
+- `public/h20-runtime.json` is the dev config used by `npm start`; keep it identical to `config/runtime/dev.json` (the test checks this).
+- To fill in prod: in the prod Firebase console open the web app and copy its config values (`apiKey`, `appId`, `messagingSenderId`, ...) into `config/runtime/prod.json`, and set `n8nWebhookBaseUrl` to the prod n8n URL. While `apiKey` is empty, prod runs with auth disabled (demo mode).
