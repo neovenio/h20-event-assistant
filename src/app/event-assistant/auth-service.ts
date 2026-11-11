@@ -4,6 +4,11 @@ import type { Auth, User } from 'firebase/auth';
 export class AuthService {
   readonly user = signal<User | null>(null);
   readonly staff = signal(false);
+  /** Local demo only: opens the demo staff portal when no n8n backend is configured. */
+  readonly demoStaff = signal(false);
+  /** Set by the staff route guard so the shell can prompt for a login. */
+  readonly accessDenied = signal(false);
+  private claims: Promise<void> = Promise.resolve();
   private instance: Promise<Auth> | null = null;
   async restore(): Promise<void> {
     await this.auth();
@@ -30,10 +35,11 @@ export class AuthService {
       initializeApp(settings.firebase, 'h20-auth');
     const auth = getAuth(app);
     await setPersistence(auth, browserSessionPersistence);
-    onIdTokenChanged(auth, async (user) => {
+    onIdTokenChanged(auth, (user) => {
       this.user.set(user);
       this.staff.set(false);
-      if (user) {
+      this.claims = (async () => {
+        if (!user) return;
         try {
           const token = await user.getIdTokenResult();
           if (this.user() === user) this.staff.set(token.claims['staff'] === true);
@@ -41,9 +47,10 @@ export class AuthService {
           // Keep staff access disabled when the refreshed claims cannot be verified.
           if (this.user() === user) this.staff.set(false);
         }
-      }
+      })();
     });
     await auth.authStateReady();
+    await this.claims;
     return auth;
   }
   async signIn(email: string, password: string): Promise<void> {
@@ -77,5 +84,6 @@ export class AuthService {
     }
     this.user.set(null);
     this.staff.set(false);
+    this.demoStaff.set(false);
   }
 }

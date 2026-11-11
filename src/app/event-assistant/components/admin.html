@@ -14,7 +14,7 @@
 </div>
 <nav class="subnav" aria-label="Beheer">
   @for (item of tabs; track item.id) {
-    <button [class.active]="tab() === item.id" (click)="tab.set(item.id)">{{ item.label }}</button>
+    <button [routerLink]="['/admin', item.id]" routerLinkActive="active">{{ item.label }}</button>
   }
 </nav>
 @if (error) {
@@ -23,7 +23,7 @@
 @if (success) {
   <p class="success" role="status">{{ success }}</p>
 }
-@switch (tab()) {
+@switch (section()) {
   @case ('bookings') {
     <div class="stats">
       <div class="panel">
