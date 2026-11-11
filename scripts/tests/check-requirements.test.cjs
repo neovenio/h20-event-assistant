@@ -20,7 +20,11 @@ function createFixtureRoot({
 
   fs.writeFileSync(
     path.join(tmp, 'src/app/event-assistant/brand.css'),
-    ':root { --black: #000000; --white: #ffffff; --pink: #e1014b; --cyan: #5fc2d2; }',
+    ":root { --black: #000000; --white: #ffffff; --pink: #e1014b; --cyan: #5fc2d2; --h20-font-sans: 'nudista-web', 'Barlow', sans-serif; }",
+  );
+  fs.writeFileSync(
+    path.join(tmp, 'src/index.html'),
+    '<link href="https://fonts.googleapis.com/css2?family=Barlow" rel="stylesheet">',
   );
   fs.writeFileSync(
     path.join(tmp, 'src/app/app.html'),
