@@ -91,6 +91,12 @@
                 <span class="status-pill">{{
                   b.requestStatus || b.reservation.bookingStatus
                 }}</span>
+                @if (b.aiStatus === 'failed') {
+                  <span class="status-pill" data-indicator="ai-missing">AI-uitleg ontbreekt</span>
+                }
+                @if (staleClaim(b)) {
+                  <span class="status-pill" data-indicator="incomplete">Onvolledige aanvraag</span>
+                }
               </td>
               <td><button (click)="selectBooking.emit(b)">Bekijk</button></td>
             </tr>

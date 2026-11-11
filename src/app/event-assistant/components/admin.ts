@@ -14,6 +14,7 @@ import {
 import { localDate } from '../event-utils';
 import { Modal } from './modal';
 import { Assistant } from './assistant';
+const STALE_CLAIM_MS = 10 * 60 * 1000;
 @Component({
   selector: 'app-admin',
   imports: [FormsModule, CurrencyPipe, DatePipe, Modal, Assistant, RouterLink, RouterLinkActive],
@@ -42,6 +43,16 @@ export class Admin {
     { id: 'sources', label: 'Brongegevens' },
     { id: 'logs', label: 'Activiteitenlog' },
   ];
+  /** A claim that never reached its final write (see docs/adr/0001-slot-claims.md). */
+  staleClaim(b: Booking): boolean {
+    return (
+      b.claimStatus === 'claiming' &&
+      b.requestStatus !== 'rejected' &&
+      !['Cancelled', 'Refunded', 'Draft'].includes(b.reservation.bookingStatus) &&
+      !!b.claimCreatedAt &&
+      Date.now() - Date.parse(b.claimCreatedAt) > STALE_CLAIM_MS
+    );
+  }
   readonly filtered = computed(() =>
     this.store
       .bookings()

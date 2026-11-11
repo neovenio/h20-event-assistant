@@ -101,6 +101,34 @@ function upsert(name, x, y = 0) {
     y,
   );
 }
+function insertRow(name, x, y = 0) {
+  return node(
+    name,
+    'dataTable',
+    {
+      resource: 'row',
+      operation: 'insert',
+      dataTableId: table,
+      columns: {
+        mappingMode: 'defineBelow',
+        value: {
+          recordId: '={{ $json.recordId }}',
+          kind: '={{ $json.kind }}',
+          payload: '={{ $json.payload }}',
+        },
+        schema: [
+          { id: 'recordId', displayName: 'recordId', type: 'string' },
+          { id: 'kind', displayName: 'kind', type: 'string' },
+          { id: 'payload', displayName: 'payload', type: 'string' },
+        ],
+      },
+      options: {},
+    },
+    x,
+    y,
+    { onError: 'continueRegularOutput' },
+  );
+}
 function write(file, name, nodes, connections) {
   fs.writeFileSync(
     path.join(root, 'workflows', file),
@@ -147,10 +175,33 @@ function apiWorkflow(admin) {
       { alwaysOutputData: true, onError: 'continueRegularOutput' },
     ),
   );
+  // Reserve first, verify after: insert the claim row, re-read everything, lowest Data Table row id wins.
+  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');if($('Insert claim').all().some(item=>item.json.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);return [{json:settleClaim($('Route request').first().json,parseRows(items),$('Insert claim').first().json.id)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   const routing = `${domain}\ntry { const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const body=$('Webhook').first().json.body??{};if(JSON.stringify(body).length>25000)fail('Verzoek is te groot.',413);return [{json:${admin ? 'adminAction' : 'publicAction'}(body,parseRows(items))}]; }catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   nodes.push(code('Route request', routing, 440));
+  nodes.push(check('Needs claim', 'claim', 660, 160));
+  nodes.push(
+    code('Write claim', 'return [{json:$("Route request").first().json.claimRow}];', 880, 160),
+  );
+  nodes.push(insertRow('Insert claim', 1100, 160));
+  nodes.push(
+    node(
+      'Re-read records after claim',
+      'dataTable',
+      { resource: 'row', operation: 'get', dataTableId: table, returnAll: true },
+      1320,
+      160,
+      { alwaysOutputData: true, onError: 'continueRegularOutput' },
+    ),
+  );
+  nodes.push(code('Settle claim', settle, 1540, 160));
+  connect(connections, 'Route request', 'Needs claim');
+  connect(connections, 'Needs claim', 'Write claim');
+  connect(connections, 'Write claim', 'Insert claim');
+  connect(connections, 'Insert claim', 'Re-read records after claim');
+  connect(connections, 'Re-read records after claim', 'Settle claim');
   if (!admin) {
-    nodes.push(check('Needs Gemini', 'gemini', 660));
+    nodes.push(check('Needs Gemini', 'gemini', 1100, -140));
     nodes.push(
       node(
         'Gemini',
@@ -165,7 +216,7 @@ function apiWorkflow(admin) {
           jsonBody: '={{ $json.geminiBody }}',
           options: { timeout: 45000 },
         },
-        880,
+        1320,
         -140,
         { onError: 'continueRegularOutput' },
       ),
@@ -174,21 +225,58 @@ function apiWorkflow(admin) {
       code(
         'Validate AI output',
         `${domain}\ntry{return [{json:finishGemini($('Route request').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??502,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
-        1100,
+        1540,
         -140,
       ),
     );
-    nodes.push(code('Result', 'return $input.all();', 1320));
-    connect(connections, 'Route request', 'Needs Gemini');
+    nodes.push(code('Result', 'return $input.all();', 1760));
+    connect(connections, 'Settle claim', 'Needs Gemini');
+    connect(connections, 'Needs claim', 'Needs Gemini', 1);
     connect(connections, 'Needs Gemini', 'Gemini');
     connect(connections, 'Needs Gemini', 'Result', 1);
     connect(connections, 'Gemini', 'Validate AI output');
     connect(connections, 'Validate AI output', 'Result');
   } else {
-    nodes.push(code('Result', 'return $input.all();', 660));
-    connect(connections, 'Route request', 'Result');
+    nodes.push(code('Result', 'return $input.all();', 1760, 160));
+    connect(connections, 'Needs claim', 'Result', 1);
+    connect(connections, 'Settle claim', 'Result');
   }
-  const offset = admin ? 880 : 1540;
+  const offset = admin ? 1980 : 1980;
+  nodes.push(check('Needs delete', 'lost', offset - 220, 160));
+  nodes.push(
+    node(
+      'Delete lost claim',
+      'dataTable',
+      {
+        resource: 'row',
+        operation: 'deleteRows',
+        dataTableId: table,
+        matchType: 'allConditions',
+        filters: {
+          conditions: [
+            {
+              keyName: 'id',
+              condition: 'eq',
+              keyValue: '={{ $("Result").first().json.deleteRowId }}',
+            },
+          ],
+        },
+      },
+      offset,
+      260,
+      // deleteRows outputs nothing when no row matches; the webhook must still be answered.
+      { onError: 'continueRegularOutput', alwaysOutputData: true },
+    ),
+  );
+  // A failed delete still answers 409: the leftover claiming row errs on the cautious side.
+  nodes.push(
+    code(
+      'After lost claim',
+      `const result=$('Result').first().json;return [{json:{status:result.status,response:result.response}}];`,
+      offset + 220,
+      260,
+    ),
+  );
   nodes.push(check('Needs save', 'save', offset));
   nodes.push(
     code('Write payload', 'return [{json:$("Result").first().json.write}];', offset + 220, -100),
@@ -225,7 +313,11 @@ function apiWorkflow(admin) {
   );
   connect(connections, 'Webhook', 'Read records');
   connect(connections, 'Read records', 'Route request');
-  connect(connections, 'Result', 'Needs save');
+  connect(connections, 'Result', 'Needs delete');
+  connect(connections, 'Needs delete', 'Delete lost claim');
+  connect(connections, 'Needs delete', 'Needs save', 1);
+  connect(connections, 'Delete lost claim', 'After lost claim');
+  connect(connections, 'After lost claim', 'Respond');
   connect(connections, 'Needs save', 'Write payload');
   connect(connections, 'Needs save', 'Respond', 1);
   connect(connections, 'Write payload', 'Save record');

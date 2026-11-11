@@ -27,7 +27,14 @@ function parseRows(rows) {
     .filter((row) => typeof row.payload === 'string')
     .map((row) => {
       try {
-        return { ...JSON.parse(row.payload), recordId: row.recordId, kind: row.kind };
+        // rowId/rowCreatedAt are the Data Table's auto-generated id and createdAt system columns.
+        return {
+          ...JSON.parse(row.payload),
+          recordId: row.recordId,
+          kind: row.kind,
+          rowId: row.id,
+          rowCreatedAt: row.createdAt,
+        };
       } catch {
         fail('Een opgeslagen record is ongeldig.', 503);
       }
@@ -51,6 +58,8 @@ function row(kind, id, data, extra = {}) {
 function publicBooking(booking) {
   const result = JSON.parse(JSON.stringify(booking));
   delete result.reviewNotes;
+  delete result.claimStatus;
+  delete result.aiStatus;
   delete result.planning;
   result.reservation.internalNotes = [];
   if (result.requestStatus !== 'approved') delete result.explanation;
@@ -67,6 +76,76 @@ function getBooking(rows, id) {
   if (!found) fail('Aanvraag niet gevonden.', 404);
   return found;
 }
+const INACTIVE_BOOKING_STATUSES = ['Cancelled', 'Refunded', 'Draft'];
+function isActiveBooking(b) {
+  return (
+    !INACTIVE_BOOKING_STATUSES.includes(b.reservation.bookingStatus) &&
+    b.requestStatus !== 'rejected'
+  );
+}
+/** Rows written before slot claims existed have neither field: they count as held / ok. */
+function claimStatusOf(data) {
+  return data?.claimStatus === 'claiming' ? 'claiming' : 'held';
+}
+function aiStatusOf(data) {
+  return data?.aiStatus === 'failed' ? 'failed' : 'ok';
+}
+function bookingRoomIds(b) {
+  return [b.event.room.id, ...array(b.event.additionalRooms).map((r) => r.id)];
+}
+/** Normalises an active block or booking row to the shape that resolveClaim compares. */
+function claimShape(item) {
+  if (item.kind === 'block' && item.data)
+    return {
+      rowId: item.rowId,
+      roomIds: [item.data.roomId],
+      date: item.data.date,
+      startTime: item.data.startTime,
+      endTime: item.data.endTime,
+    };
+  if (item.kind === 'booking' && item.data && isActiveBooking(item.data))
+    return {
+      rowId: item.rowId,
+      roomIds: bookingRoomIds(item.data),
+      date: item.data.event.date,
+      startTime: item.data.event.startTime,
+      endTime: item.data.event.endTime,
+    };
+  return null;
+}
+const validId = (id) => id != null && id !== '' && Number.isFinite(Number(id));
+/** A competing claim without a usable id might be older than ours, so it ranks first (blocks us). */
+const rivalRank = (id) => (validId(id) ? Number(id) : -Infinity);
+/**
+ * Reserve-first protocol: among the active claims overlapping `claim` (plus the claim itself) the
+ * one with the lowest Data Table row id wins. Pure and order independent. Fails closed: a claim
+ * without its own system id never wins.
+ */
+function resolveClaim(rows, claim) {
+  if (!validId(claim.rowId)) return { won: false, winnerId: null };
+  const own = Number(claim.rowId);
+  const rivals = rows
+    .map(claimShape)
+    .filter(
+      (other) =>
+        other &&
+        (!validId(other.rowId) || Number(other.rowId) !== own) &&
+        other.date === claim.date &&
+        other.roomIds.some((id) => claim.roomIds.includes(id)) &&
+        overlaps(claim.startTime, claim.endTime, other.startTime, other.endTime),
+    );
+  const winnerId = Math.min(own, ...rivals.map((other) => rivalRank(other.rowId)));
+  return { won: winnerId === own, winnerId: Number.isFinite(winnerId) ? winnerId : null };
+}
+/** A transient duplicate recordId (double submit) is read as its lowest-id row. */
+function dedupe(rows) {
+  const best = new Map();
+  for (const item of rows) {
+    const current = best.get(item.recordId);
+    if (!current || rivalRank(item.rowId) < rivalRank(current.rowId)) best.set(item.recordId, item);
+  }
+  return rows.filter((item) => best.get(item.recordId) === item);
+}
 function hasConflict(rows, ids, date, start, end, except = '') {
   return (
     records(rows, 'block').some(
@@ -78,11 +157,8 @@ function hasConflict(rows, ids, date, start, end, except = '') {
     records(rows, 'booking').some(
       (b) =>
         b.id !== except &&
-        !['Cancelled', 'Refunded', 'Draft'].includes(b.reservation.bookingStatus) &&
-        b.requestStatus !== 'rejected' &&
-        [b.event.room.id, ...array(b.event.additionalRooms).map((r) => r.id)].some((id) =>
-          ids.includes(id),
-        ) &&
+        isActiveBooking(b) &&
+        bookingRoomIds(b).some((id) => ids.includes(id)) &&
         b.event.date === date &&
         overlaps(start, end, b.event.startTime, b.event.endTime),
     )
@@ -350,7 +426,80 @@ function recommendConfiguration(body, rows) {
     customerNotes: '',
   };
 }
-function publicAction(body, rows) {
+function requestContext(body, rows, validated, booking, route) {
+  return {
+    route,
+    status: 201,
+    claimKind: 'booking',
+    claimRow: row('booking', booking.id, booking, {
+      customerToken: body.customerToken,
+      ownerUid: body._identity?.uid,
+    }),
+    booking,
+    ownerUid: body._identity?.uid,
+    customerToken: body.customerToken,
+    config: validated.config,
+    geminiBody: geminiBody(
+      {
+        task: 'Maak een uitleg en een voorlopige planning binnen de begin- en eindtijd. Gebruik alleen de geselecteerde ruimtes. Verantwoordelijke: nog toe te wijzen. Geef geen persoonsgegevens terug.',
+        config: validated.config,
+        catalogue: catalogue(rows),
+        knownCosts: validated.price,
+        warnings: validated.warnings,
+      },
+      proposalSchema,
+    ),
+  };
+}
+function lostClaim(rowId) {
+  return {
+    route: 'lost',
+    status: 409,
+    deleteRowId: Number(rowId),
+    response: { error: 'Deze datum of tijd overlapt een aanvraag of blokkade.' },
+  };
+}
+/** A retry that finds its own claim still 'claiming' verifies again instead of trusting it. */
+function reverifyRequest(body, rows, existing) {
+  const claim = claimShape(existing);
+  if (!validId(existing.rowId))
+    fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
+  if (!resolveClaim(rows, claim).won) return lostClaim(existing.rowId);
+  // Own and rival claims are excluded: the conflict check already ran when the claim was inserted.
+  const catalogueRows = rows.filter((r) => r.kind !== 'booking' && r.kind !== 'block');
+  const validated = validateRequest(body, catalogueRows);
+  return requestContext(body, catalogueRows, validated, existing.data, 'gemini');
+}
+/**
+ * Second half of the reserve-first protocol. `rows` is a fresh read that includes the claim row and
+ * `ownRowId` is the system id returned by our own insert (never rediscovered by recordId, which a
+ * double submit can duplicate).
+ */
+function settleClaim(context, rows, ownRowId) {
+  if (!validId(ownRowId)) {
+    // Fail closed. Only delete when the row is unambiguous, otherwise we could remove a rival.
+    const same = rows.filter((r) => r.recordId === context.claimRow.recordId);
+    const error = { error: 'De reservering kon niet worden bevestigd. Probeer opnieuw.' };
+    return same.length === 1 && validId(same[0].rowId)
+      ? { route: 'lost', status: 503, deleteRowId: Number(same[0].rowId), response: error }
+      : { route: 'respond', status: 503, response: error };
+  }
+  const data = JSON.parse(context.claimRow.payload).data;
+  const claim = claimShape({ kind: context.claimKind, data, rowId: ownRowId });
+  if (!resolveClaim(rows, claim).won) return lostClaim(ownRowId);
+  if (context.claimKind === 'block') {
+    const parsed = JSON.parse(context.claimRow.payload);
+    const held = { ...parsed, data: { ...parsed.data, claimStatus: 'held' } };
+    return saveResponse(
+      { ...context.claimRow, payload: JSON.stringify(held) },
+      context.response,
+      context.status,
+    );
+  }
+  return { ...context, route: 'gemini' };
+}
+function publicAction(body, allRows) {
+  const rows = dedupe(allRows);
   if (body.action === 'my-requests') {
     if (!body._identity?.uid) fail('Log eerst in.', 401);
     return response({
@@ -374,28 +523,13 @@ function publicAction(body, rows) {
     if (existing) {
       if (existing.ownerUid !== body._identity.uid) fail('Ongeldige aanvraagreferentie.', 409);
       if (existing.customerToken !== body.customerToken) fail('Ongeldige aanvraagreferentie.', 409);
+      if (claimStatusOf(existing.data) === 'claiming' && isActiveBooking(existing.data))
+        return reverifyRequest(body, allRows, existing);
       return response({ booking: publicBooking(existing.data) });
     }
     const validated = validateRequest(body, rows);
-    const booking = buildBooking(body, validated);
-    return {
-      route: 'gemini',
-      status: 201,
-      booking,
-      ownerUid: body._identity?.uid,
-      customerToken: body.customerToken,
-      config: validated.config,
-      geminiBody: geminiBody(
-        {
-          task: 'Maak een uitleg en een voorlopige planning binnen de begin- en eindtijd. Gebruik alleen de geselecteerde ruimtes. Verantwoordelijke: nog toe te wijzen. Geef geen persoonsgegevens terug.',
-          config: validated.config,
-          catalogue: catalogue(rows),
-          knownCosts: validated.price,
-          warnings: validated.warnings,
-        },
-        proposalSchema,
-      ),
-    };
+    const booking = { ...buildBooking(body, validated), claimStatus: 'claiming' };
+    return requestContext(body, rows, validated, booking, 'claim');
   }
   if (body.action === 'chat') {
     const message = text(body.message, 2000);
@@ -418,31 +552,28 @@ function publicAction(body, rows) {
   }
   fail('Onbekende actie.', 404);
 }
-function finishGemini(context, result) {
-  let generated;
+function parseGenerated(result) {
+  const raw = array(result?.candidates)[0]
+    ?.content?.parts?.filter((part) => typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('');
+  return JSON.parse(raw);
+}
+function validProposal(context, generated) {
   try {
-    const raw = array(result.candidates)[0]
-      ?.content?.parts?.filter((part) => typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('');
-    generated = JSON.parse(raw);
+    return checkProposal(context, generated);
   } catch {
-    fail('Het AI-antwoord kon niet worden verwerkt. Probeer opnieuw.', 502);
+    return false; // malformed shapes (null items, wrong types) count as invalid output
   }
-  if (context.chat) {
-    if (!text(generated.reply, 6000)) fail('Leeg AI-antwoord.', 502);
-    return response({
-      reply: text(generated.reply, 6000),
-      ...(context.config ? { config: context.config } : {}),
-    });
-  }
+}
+function checkProposal(context, generated) {
   if (
     !text(generated.explanation, 12000) ||
     !Array.isArray(generated.planning) ||
     !generated.planning.length ||
     generated.planning.length > 30
   )
-    fail('Ongeldig AI-voorstel.', 502);
+    return false;
   const rooms = [
     context.booking.event.room.name,
     ...array(context.booking.event.additionalRooms).map((r) => r.name),
@@ -458,21 +589,44 @@ function finishGemini(context, result) {
       minutes(item.endTime) <= minutes(item.startTime) ||
       minutes(item.endTime) > minutes(context.booking.event.endTime)
     )
-      fail('De AI-planning bevat ongeldige tijden of ruimtes.', 502);
+      return false;
     previous = minutes(item.endTime);
   }
-  const booking = {
-    ...context.booking,
-    explanation: text(generated.explanation, 12000),
-    planning: generated.planning.map((item) => ({
-      startTime: item.startTime,
-      endTime: item.endTime,
-      activity: text(item.activity, 500),
-      room: item.room,
-      materials: text(item.materials, 500),
-      responsible: 'Nog toe te wijzen',
-    })),
-  };
+  return true;
+}
+function finishGemini(context, result) {
+  let generated;
+  try {
+    generated = parseGenerated(result);
+  } catch {
+    generated = null;
+  }
+  if (context.chat) {
+    if (!generated) fail('Het AI-antwoord kon niet worden verwerkt. Probeer opnieuw.', 502);
+    if (!text(generated.reply, 6000)) fail('Leeg AI-antwoord.', 502);
+    return response({
+      reply: text(generated.reply, 6000),
+      ...(context.config ? { config: context.config } : {}),
+    });
+  }
+  // The claim is already won: a failed or invalid AI result keeps the hold and flags it for staff.
+  const ok = generated && validProposal(context, generated);
+  const booking = ok
+    ? {
+        ...context.booking,
+        claimStatus: 'held',
+        aiStatus: 'ok',
+        explanation: text(generated.explanation, 12000),
+        planning: generated.planning.map((item) => ({
+          startTime: item.startTime,
+          endTime: item.endTime,
+          activity: text(item.activity, 500),
+          room: item.room,
+          materials: text(item.materials, 500),
+          responsible: 'Nog toe te wijzen',
+        })),
+      }
+    : { ...context.booking, claimStatus: 'held', aiStatus: 'failed' };
   return saveResponse(
     row('booking', booking.id, booking, {
       customerToken: context.customerToken,
@@ -500,7 +654,8 @@ function audit(entry, action, previousValue = '', newValue = '') {
     ],
   };
 }
-function adminAction(body, rows) {
+function adminAction(body, allRows) {
+  const rows = dedupe(allRows);
   if (body.action === 'session') return response({ authenticated: true });
   if (body.action === 'snapshot')
     return response({
@@ -508,7 +663,13 @@ function adminAction(body, rows) {
       catering: records(rows, 'catering'),
       upgrades: records(rows, 'upgrade'),
       activities: records(rows, 'activity'),
-      bookings: records(rows, 'booking'),
+      bookings: rows
+        .filter((item) => item.kind === 'booking')
+        .map((item) =>
+          claimStatusOf(item.data) === 'claiming'
+            ? { ...item.data, claimCreatedAt: item.rowCreatedAt }
+            : item.data,
+        ),
       blocks: records(rows, 'block'),
       logs: rows
         .flatMap((item) => array(item.audit))
@@ -524,6 +685,10 @@ function adminAction(body, rows) {
         fail('Deze aanvraag is afgesloten.', 409);
       if (!['approve', 'reject', 'cancel'].includes(body.actionType)) fail('Ongeldige status.');
       if (body.actionType === 'approve') {
+        if (claimStatusOf(b) === 'claiming')
+          fail('Deze aanvraag wordt nog verwerkt. Probeer het later opnieuw.', 409);
+        if (aiStatusOf(b) === 'failed' && !text(b.explanation))
+          fail('Voeg eerst een uitleg toe voordat je deze aanvraag goedkeurt.', 409);
         if (
           hasConflict(
             rows,
@@ -557,6 +722,7 @@ function adminAction(body, rows) {
       if (!text(body.explanation, 12000)) fail('Voorsteltekst is leeg.');
       b.explanation = text(body.explanation, 12000);
       b.reviewNotes = text(body.reviewNotes);
+      if (b.aiStatus) b.aiStatus = 'ok';
       b.requestStatus = 'pending_review';
       b.reservation.adminApprovalStatus = 'Pending';
       b.reservation.bookingStatus = 'Awaiting Approval';
@@ -623,7 +789,8 @@ function adminAction(body, rows) {
       fail('Ongeldige blokkade.');
     if (hasConflict(rows, [room.id], block.date, block.startTime, block.endTime))
       fail('Blokkade overlapt een aanvraag of andere blokkade.', 409);
-    const id = `${room.id}-${block.date}-${block.startTime}`;
+    // Unique per claim: two racing blocks for the same slot must insert two distinct rows.
+    const id = `${room.id}-${block.date}-${block.startTime}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const data = {
       id,
       roomId: room.id,
@@ -637,12 +804,15 @@ function adminAction(body, rows) {
         : 'Admin Block',
       createdAt: new Date().toISOString(),
       createdBy: 'Medewerker',
+      claimStatus: 'claiming',
     };
-    return saveResponse(
-      row('block', id, data, { audit: audit({ data }, 'Blokkade aangemaakt').audit }),
-      { block: data },
-      201,
-    );
+    return {
+      route: 'claim',
+      status: 201,
+      claimKind: 'block',
+      claimRow: row('block', id, data, { audit: audit({ data }, 'Blokkade aangemaakt').audit }),
+      response: { block: { ...data, claimStatus: 'held' } },
+    };
   }
   fail('Onbekende beheeractie.', 404);
 }
@@ -661,4 +831,6 @@ if (typeof module !== 'undefined')
     publicBooking,
     minutes,
     hasConflict,
+    resolveClaim,
+    settleClaim,
   };

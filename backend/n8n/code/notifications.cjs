@@ -8,7 +8,10 @@ function notificationJobs(rows, frontendUrl) {
     parsed.filter((row) => row.kind === 'notification').map((row) => row.recordId),
   );
   const jobs = [];
-  for (const row of parsed.filter((row) => row.kind === 'booking' && !row.value.deleted)) {
+  for (const row of parsed.filter(
+    (row) =>
+      row.kind === 'booking' && !row.value.deleted && row.value.data.claimStatus !== 'claiming',
+  )) {
     const b = row.value.data;
     const events = ['received', ...(b.requestStatus === 'approved' ? ['approved'] : [])];
     for (const event of events) {
