@@ -243,6 +243,11 @@ test('notification jobs are scoped to customer and skipped after delivery receip
   assert.equal(jobs[0].to, 'customer@example.test');
   assert.ok(jobs[0].text.includes(s.body.customerToken));
   assert.equal(notificationJobs([s.result.write, jobs[0]], 'https://example.test').length, 0);
+  const mailWf = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../workflows/D-email-notifications.json'), 'utf8'),
+  );
+  const prepareNode = mailWf.nodes.find((n) => n.name === 'Prepare mail');
+  assert.match(prepareNode.parameters.jsCode, /const FRONTEND_ORIGIN = 'https:\/\//);
 });
 test('workflow exports have valid connections, authentication and compilable Code nodes', () => {
   for (const file of fs.readdirSync(path.join(__dirname, '../workflows'))) {

@@ -1,5 +1,5 @@
 {
-  "n8nWebhookBaseUrl": "",
+  "n8nWebhookBaseUrl": "https://neovenio.app.n8n.cloud/webhook/h20",
   "firebase": {
     "projectId": "h20-event-assistant-dev",
     "appId": "1:904355552056:web:8452ae1d95c829f2e33fcd",
