@@ -7,12 +7,13 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "test:ci": "ng test --watch=false",
+    "test:ci": "npm run test:scripts && ng test --watch=false",
     "lint": "ng lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
-    "serve:ssr:h20-event-assistant": "node dist/h20-event-assistant/server/server.mjs"
+    "serve:ssr:h20-event-assistant": "node dist/h20-event-assistant/server/server.mjs",
+    "test:scripts": "node --test scripts/tests/*.test.cjs backend/n8n/tests/*.test.cjs"
   },
   "private": true,
   "packageManager": "npm@12.2.2",
@@ -39,6 +40,7 @@
     "@types/node": "^22.12.0",
     "angular-eslint": "22.6.0",
     "eslint": "^10.12.0",
+    "firebase-admin": "^14.5.0",
     "husky": "^9.1.7",
     "jsdom": "^30.0.0",
     "prettier": "^3.8.1",

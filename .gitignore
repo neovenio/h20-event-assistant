@@ -6,6 +6,10 @@
 /out-tsc
 /bazel-out
 
+# Local service account keys (never commit)
+/secrets/
+*-service-account*.json
+
 # Node
 /node_modules
 npm-debug.log
