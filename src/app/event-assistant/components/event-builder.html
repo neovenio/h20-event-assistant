@@ -1,0 +1,279 @@
+<app-modal heading="Stel jouw evenement samen" (dismissed)="dismissed.emit()">
+  <ol class="steps">
+    @for (label of steps; track label; let i = $index) {
+      <li [class.current]="step() === i + 1" [class.done]="step() > i + 1">
+        <span>{{ i + 1 }}</span
+        >{{ label }}
+      </li>
+    }
+  </ol>
+  <h3>Stap {{ step() }} · {{ selectedStep() }}</h3>
+  @switch (step()) {
+    @case (1) {
+      <div class="form-grid">
+        <label class="full"
+          >Naam evenement<input
+            [(ngModel)]="config.name"
+            placeholder="Bijvoorbeeld: Teamdag 2027"
+            maxlength="160"
+        /></label>
+        <label
+          >Type evenement<select [(ngModel)]="config.type">
+            @for (
+              type of [
+                'Bedrijfsevenement',
+                'Teambuilding',
+                'Congres',
+                'Gala',
+                'Esports toernooi',
+                'Verjaardag',
+                'Workshop',
+              ];
+              track type
+            ) {
+              <option>{{ type }}</option>
+            }
+          </select></label
+        >
+        <label>Datum<input type="date" [(ngModel)]="config.date" [min]="today" /></label>
+        <label>Begintijd<input type="time" [(ngModel)]="config.startTime" /></label
+        ><label>Eindtijd<input type="time" [(ngModel)]="config.endTime" /></label>
+        <label
+          >Alternatieve datum (optioneel)<input
+            type="date"
+            [(ngModel)]="config.alternativeDate"
+            [min]="today"
+        /></label>
+      </div>
+    }
+    @case (2) {
+      <div class="form-grid">
+        <label
+          >Aantal deelnemers<input
+            type="number"
+            min="1"
+            max="1200"
+            step="1"
+            [(ngModel)]="config.participants" /></label
+        ><label
+          >Budget (€)<input
+            type="number"
+            min="0"
+            [(ngModel)]="config.budgetRange"
+            placeholder="Bijvoorbeeld 5000" /></label
+        ><label class="check"
+          ><input type="checkbox" [(ngModel)]="config.budgetVatInclusive" /> Budget inclusief
+          btw</label
+        >
+      </div>
+      <p class="notice">
+        De kosten zijn indicatief. Catering en opties zonder bevestigd tarief blijven op aanvraag.
+      </p>
+    }
+    @case (3) {
+      <div class="card-grid compact">
+        @for (room of store.activeRooms(); track room.id) {
+          <article class="card" [class.selected]="config.selectedRoomId === room.id">
+            <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+            <div class="card-body">
+              <h4>{{ room.name }}</h4>
+              @if (recommendedRoom?.id === room.id) {
+                <span class="badge">Past bij jouw groepsgrootte</span>
+              }
+              <p>{{ room.capacityDisplay }}</p>
+              @if (!room.capacityVerified) {
+                <small class="warning">Capaciteit te bevestigen</small>
+              }
+              <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur · indicatief</p>
+              <button
+                type="button"
+                [disabled]="!!room.maxCapacity && config.participants > room.maxCapacity"
+                (click)="selectRoom(room)"
+              >
+                {{ config.selectedRoomId === room.id ? '✓ Geselecteerd' : 'Kies hoofdzaal' }}
+              </button>
+              @if (config.selectedRoomId !== room.id) {
+                <label class="check"
+                  ><input
+                    type="checkbox"
+                    [checked]="extraSelected(room.id)"
+                    (change)="toggleRoom(room)"
+                  />
+                  Extra zaal</label
+                >
+              }
+            </div>
+          </article>
+        }
+      </div>
+    }
+    @case (4) {
+      <div class="card-grid compact">
+        @for (item of store.activities(); track item.name) {
+          <label class="choice" [class.selected]="config.selectedActivities.includes(item.name)"
+            ><input
+              type="checkbox"
+              [checked]="config.selectedActivities.includes(item.name)"
+              (change)="config.selectedActivities = toggle(config.selectedActivities, item.name)"
+            /><strong>{{ item.name }}</strong
+            ><small>{{ item.description }}</small></label
+          >
+        }
+      </div>
+      <p class="muted">
+        {{
+          store.live()
+            ? 'Activiteiten zonder gepubliceerd tarief zijn op aanvraag.'
+            : 'Prototype-inschatting: € 250 per activiteit, exclusief btw. Definitieve tarieven worden bevestigd.'
+        }}
+      </p>
+      <div class="form-grid">
+        <label
+          >Gamingvoorkeuren<input
+            [ngModel]="config.gamingPreferences.join(', ')"
+            (ngModelChange)="config.gamingPreferences = $event.split(',')"
+            placeholder="Rocket League, EA FC…" /></label
+        ><label
+          >VR-voorkeuren<input
+            [ngModel]="config.vrPreferences.join(', ')"
+            (ngModelChange)="config.vrPreferences = $event.split(',')"
+            placeholder="VR escape, Beat Saber…"
+        /></label>
+      </div>
+      <h4>Event upgrades</h4>
+      <div class="card-grid compact">
+        @for (addon of store.upgrades(); track addon.id) {
+          @if (addon.isActive) {
+            <label class="choice"
+              ><input
+                type="checkbox"
+                [checked]="addonSelected(addon.id)"
+                (change)="toggleAddon(addon.id)"
+              /><strong>{{ addon.name }}</strong
+              ><small>{{ addon.priceDisplay }}</small></label
+            >
+          }
+        }
+      </div>
+    }
+    @case (5) {
+      <div class="card-grid compact">
+        @for (item of store.catering(); track item.id) {
+          @if (item.isActive) {
+            <label class="choice" [class.selected]="config.cateringSelections.includes(item.name)"
+              ><input
+                type="checkbox"
+                [checked]="config.cateringSelections.includes(item.name)"
+                (change)="config.cateringSelections = toggle(config.cateringSelections, item.name)"
+              /><strong>{{ item.name }}</strong
+              ><small>{{ item.description }}</small
+              ><span class="warning">{{ item.priceDisplay }}</span></label
+            >
+          }
+        }
+      </div>
+    }
+    @case (6) {
+      <div class="form-grid">
+        <label class="full"
+          >Sfeer<select [(ngModel)]="config.atmosphere">
+            @for (
+              mood of [
+                'Modern & High-Tech',
+                'Zakelijk & Professioneel',
+                'Feestelijk & Energiek',
+                'Ontspannen & Informeel',
+              ];
+              track mood
+            ) {
+              <option>{{ mood }}</option>
+            }
+          </select></label
+        ><label class="full"
+          >Speciale wensen / dieetwensen<textarea
+            [(ngModel)]="config.specialRequests"
+            rows="3"
+            maxlength="3000"
+          ></textarea></label
+        ><label class="full"
+          >Overige opmerkingen<textarea
+            [(ngModel)]="config.customerNotes"
+            rows="3"
+            maxlength="3000"
+          ></textarea>
+        </label>
+      </div>
+    }
+    @case (7) {
+      <div class="summary-grid">
+        <section class="panel">
+          <span class="badge">CONCEPTVOORSTEL</span>
+          <h3>{{ config.name }}</h3>
+          <p>{{ config.type }} · {{ config.participants }} personen</p>
+          <p>{{ config.date }} · {{ config.startTime }} – {{ config.endTime }}</p>
+          <h4>{{ config.selectedRoomName }}</h4>
+          @for (room of config.additionalRooms; track room.id) {
+            <p>+ {{ room.name }}</p>
+          }
+          <p>{{ config.selectedActivities.join(' · ') || 'Geen activiteiten geselecteerd' }}</p>
+          <p>{{ config.cateringSelections.join(' · ') || 'Geen catering geselecteerd' }}</p>
+          <p>{{ config.specialRequests }}</p>
+        </section>
+        <section class="panel">
+          <h3>Kostenindicatie</h3>
+          <dl class="totals">
+            <div>
+              <dt>Zalen</dt>
+              <dd>{{ price.roomCost | currency: 'EUR' }}</dd>
+            </div>
+            <div>
+              <dt>Activiteiten</dt>
+              <dd>{{ price.activities | currency: 'EUR' }}</dd>
+            </div>
+            <div>
+              <dt>Bekende extra kosten</dt>
+              <dd>{{ price.extras | currency: 'EUR' }}</dd>
+            </div>
+            <div>
+              <dt>Btw (21%, indicatief)</dt>
+              <dd>{{ price.vat | currency: 'EUR' }}</dd>
+            </div>
+            <div>
+              <dt>Totaal bekende kosten</dt>
+              <dd>{{ price.total | currency: 'EUR' }}</dd>
+            </div>
+          </dl>
+          @if (price.onRequest) {
+            <p class="warning">Aanvullende kosten op aanvraag zijn niet inbegrepen.</p>
+          }
+          <p class="muted">
+            Een medewerker controleert prijzen, beschikbaarheid en planning vóór een definitieve
+            offerte.
+          </p>
+        </section>
+      </div>
+    }
+  }
+  @if (error) {
+    <p class="error" role="alert">{{ error }}</p>
+  }
+  <footer class="modal-footer">
+    <div>
+      <strong>{{ price.total | currency: 'EUR' }}</strong
+      ><small class="muted">
+        incl. indicatieve btw {{ price.onRequest ? '+ opties op aanvraag' : '' }}</small
+      >
+    </div>
+    <div class="actions">
+      @if (step() > 1) {
+        <button type="button" (click)="step.set(step() - 1)">Vorige</button>
+      }
+      @if (step() < 7) {
+        <button type="button" class="primary" (click)="next()">Volgende →</button>
+      } @else {
+        <button type="button" (click)="save()">Concept bewaren</button
+        ><button type="button" class="primary" (click)="submit()">Aanvraag voorbereiden →</button>
+      }
+    </div>
+  </footer>
+</app-modal>

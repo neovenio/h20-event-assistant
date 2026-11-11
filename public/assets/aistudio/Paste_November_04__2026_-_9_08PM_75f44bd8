@@ -1,0 +1,1665 @@
+# PROJECT: H20 AI EVENT ASSISTANT
+## COMPLETE FULL-STACK AI EVENT PLANNING, BOOKING AND MANAGEMENT PLATFORM
+
+Build a complete, professional, modern and fully functional AI-powered event planning and reservation platform for H20 Event Location in Purmerend, Netherlands.
+
+This is a complete software application, not just a landing page or a visual prototype.
+
+The application must combine:
+- AI-powered event planning.
+- Intelligent room recommendations.
+- Event configuration.
+- Activity recommendations.
+- Catering selection.
+- Budget calculations.
+- Event scheduling.
+- Online reservations.
+- Date and availability management.
+- Secure online payments.
+- Customer accounts.
+- Administrator management.
+- Booking calendars.
+- H20 knowledge management.
+
+IMPORTANT:
+If an existing H20 AI Event Assistant project already exists, extend it rather than rebuilding it. Preserve all existing working features, data, design decisions and integrations.
+
+The finished product must look and function like a premium commercial SaaS application.
+
+---
+
+# PART 1 – BRAND IDENTITY AND DESIGN
+
+## 1.1 Application identity
+
+Application name:
+
+H20 AI Event Assistant
+
+Location:
+
+H20 Event Location
+Spinnekop 2-3
+1444 GN Purmerend
+The Netherlands.
+
+Purpose:
+
+Help customers create, personalise, plan, book and pay for events at H20 using artificial intelligence.
+
+## 1.2 Visual identity
+
+Create a premium modern technology-inspired interface.
+
+Design direction:
+- Modern SaaS dashboard.
+- Futuristic but professional.
+- Premium technology atmosphere.
+- Minimalist layout.
+- Beautiful spacing.
+- Smooth animations.
+- Rounded cards.
+- Clear typography.
+- High-quality photography.
+- Intuitive navigation.
+
+Colour palette:
+- Primary background: Dark navy.
+- Secondary background: Deep charcoal.
+- Primary accent: Electric purple.
+- Secondary accent: Bright blue.
+- Additional accent: Soft cyan.
+- Text: White and light grey.
+
+Use subtle purple and blue gradients for AI-related elements.
+
+Avoid:
+- Cluttered layouts.
+- Too many colours.
+- Oversized text.
+- Unnecessary decorations.
+- Cheap-looking components.
+- Generic template appearance.
+
+## 1.3 Responsive design
+
+The entire application must work on:
+- Desktop.
+- Laptop.
+- Tablet.
+- Mobile phones.
+
+Create responsive navigation, calendars, forms, dashboards and booking cards.
+
+## 1.4 Creator credit
+
+Display the following small text throughout the entire application:
+
+"Made by Germain"
+
+Requirements:
+- Position: Fixed bottom-left corner.
+- Font size: 11–12px.
+- Colour: Subtle light grey.
+- Modern minimalist typography.
+- Visible but unobtrusive.
+- No large logo.
+- No watermark.
+- No decorative branding that competes with the interface.
+- Responsive on desktop, tablet and mobile.
+- Must not overlap important interface elements.
+
+Show this exact wording on:
+- Homepage.
+- Customer dashboard.
+- AI Event Builder.
+- AI Chat.
+- Room Finder.
+- Booking pages.
+- Payment pages.
+- Admin login.
+- Admin dashboard.
+- All other application pages.
+
+Do not remove or rename this credit.
+
+---
+
+# PART 2 – HOMEPAGE
+
+Create an impressive homepage.
+
+## 2.1 Hero section
+
+Headline:
+
+"Create Your Perfect Event with AI"
+
+Subheading:
+
+"Discover the perfect H20 experience. Plan your event, find the right venue, explore activities and create your personalised event proposal with the power of AI."
+
+Primary button:
+
+"Create Your Event"
+
+Secondary button:
+
+"Explore H20 Venues"
+
+Include:
+- Large professional H20-themed visual.
+- AI assistant introduction.
+- Modern gradient background.
+- Subtle animated elements.
+- Professional event photography.
+
+## 2.2 How it works
+
+Show four visual steps:
+
+1. Tell us about your event.
+2. Discover suitable rooms and activities.
+3. Receive your personalised AI proposal.
+4. Book and confirm your event.
+
+## 2.3 Main homepage sections
+
+Include:
+- Featured H20 rooms.
+- Gaming and VR experiences.
+- Corporate events.
+- Team building.
+- Conferences.
+- Catering possibilities.
+- Event planning features.
+- Customer benefits.
+- Contact information.
+
+Add a clear call to action at the bottom.
+
+---
+
+# PART 3 – CUSTOMER ACCOUNT SYSTEM
+
+Create a secure customer account system.
+
+Customers must be able to:
+
+- Register.
+- Log in.
+- Log out.
+- Reset their password.
+- Edit personal information.
+- View their event proposals.
+- Save event proposals.
+- View reservations.
+- View payment history.
+- Download available invoices.
+- Request booking changes.
+- Request cancellations.
+
+Customer accounts must be protected.
+
+Each customer can only access their own information and bookings.
+
+---
+
+# PART 4 – AI EVENT BUILDER
+
+This is one of the most important parts of the application.
+
+Create an intelligent multi-step event creation wizard.
+
+The interface must be visually attractive and easy to understand.
+
+Show a progress indicator so customers know which step they are completing.
+
+## Step 1 – Event information
+
+Collect:
+
+- Event name.
+- Event type.
+- Number of participants.
+- Preferred date.
+- Alternative date.
+- Start time.
+- End time.
+- Event duration.
+
+Event categories:
+
+- Corporate events.
+- Team building.
+- Gaming events.
+- VR experiences.
+- Conferences.
+- Meetings.
+- Birthday events.
+- Esports tournaments.
+- Product launches.
+- Gala events.
+- Private parties.
+- Workshops.
+- Custom events.
+
+Allow customers to describe their event in their own words.
+
+## Step 2 – Budget
+
+Allow customers to enter their budget.
+
+Suggested budget ranges:
+
+- €500–€1,000.
+- €1,000–€2,500.
+- €2,500–€5,000.
+- €5,000–€10,000.
+- €10,000+.
+- Custom amount.
+
+Ask whether the budget includes VAT.
+
+Store the budget in the event configuration.
+
+The AI must recommend combinations that fit the available budget whenever reliable prices exist.
+
+## Step 3 – Room selection
+
+Show all H20 rooms in a visual room gallery.
+
+Each room card must display:
+- Room photograph.
+- Room name.
+- Capacity.
+- Facilities.
+- Room description.
+- Suitable event types.
+- Availability status, if actually checked.
+
+Allow customers to compare rooms.
+
+## Step 4 – Activities
+
+Allow customers to select multiple activities.
+
+Available activity categories:
+
+- Gaming.
+- Esports.
+- VR.
+- AR.
+- Sim racing.
+- Nintendo gaming.
+- Arcade experiences.
+- Team challenges.
+- Workshops.
+- Presentations.
+- Streaming.
+- Custom activities.
+
+Display activity cards with images and descriptions.
+
+## Step 5 – Catering
+
+Allow customers to choose catering preferences:
+
+- Drinks.
+- Lunch.
+- Dinner.
+- Snacks.
+- Buffet.
+- Custom catering.
+
+Show real prices only when official price information has been provided.
+
+## Step 6 – Additional preferences
+
+Ask for:
+
+- Preferred atmosphere.
+- Event style.
+- Accessibility requirements.
+- Special requests.
+- Additional information.
+
+## Step 7 – Review
+
+Show a complete summary.
+
+Allow customers to edit every selection.
+
+Button:
+
+"Generate My AI Event Proposal"
+
+---
+
+# PART 5 – COMPLETE H20 VENUE DATABASE
+
+The AI must use the following H20 information as its initial knowledge base.
+
+Store all information in a structured database.
+
+Do not invent additional specifications.
+
+## 5.1 General venue information
+
+- Venue: H20 Event Location.
+- Address: Spinnekop 2-3, 1444 GN Purmerend.
+- Overall event capacity: 10–1,200 people, depending on setup.
+- Meeting and subgroup possibilities: from 4 people.
+
+## 5.2 Rabo Esports Stadium
+
+Category: Main Event Hall.
+
+Specifications:
+- 1,056 m².
+- 44 × 24 metres.
+- 7-metre ceiling height.
+- Mainstage: 22 metres wide and 6.5 metres high.
+- Custom LED screen: 50 m².
+- Professional Bose surround sound.
+- Professional audiovisual equipment.
+
+Capacity:
+50–1,200 people.
+
+Suitable for:
+- Conferences.
+- Gala events.
+- Large corporate events.
+- Esports tournaments.
+- Parties.
+- Presentations.
+- Large gaming events.
+
+AI recommendation:
+Prioritise this venue for large groups, stage events, esports tournaments and conferences.
+
+## 5.3 H20 Lounge Café
+
+Capacity:
+30–200 people.
+
+Facilities:
+- Private bar.
+- Lounge chairs.
+- Relaxed atmosphere.
+
+Suitable for:
+- Networking.
+- Drinks receptions.
+- Corporate gatherings.
+- Informal events.
+- Social events.
+
+AI recommendation:
+Prioritise this room for networking and relaxed gatherings.
+
+## 5.4 Aula
+
+Capacity:
+10–60 people.
+
+Suitable for:
+- Meetings.
+- Presentations.
+- Workshops.
+- Small group events.
+
+## 5.5 Rabo Meeting Room
+
+Capacity:
+100+ people.
+
+Exact maximum capacity:
+Requires confirmation.
+
+Suitable for:
+- Business meetings.
+- Conferences.
+- Presentations.
+- Group sessions.
+
+## 5.6 Aquarium
+
+Flexible layout for smaller and medium-sized groups.
+
+Exact capacity:
+Requires confirmation.
+
+Never invent a maximum capacity.
+
+## 5.7 Community Area
+
+Capacity:
+Approximately 10 people.
+
+Suitable for:
+- Small meetings.
+- Community gatherings.
+- Small group activities.
+
+## 5.8 Predator Gaming Room / Streaming Studio
+
+Capacity:
+10–15 people.
+
+Facilities:
+- High-end gaming PCs.
+- Streaming equipment.
+- Gaming setup.
+
+Suitable for:
+- Gaming sessions.
+- Streaming.
+- Small esports events.
+- Gaming competitions.
+- Content creation.
+
+## 5.9 XXL Meeting Room
+
+Flexible business setup.
+
+Facilities:
+- Presentation screens.
+- Flexible meeting arrangements.
+
+Exact capacity:
+Requires confirmation.
+
+## 5.10 VRgaderruimte
+
+Flexible business setup.
+
+Facilities:
+- VR integration.
+- Presentation facilities.
+
+Exact capacity:
+Requires confirmation.
+
+## 5.11 Breakout Rooms
+
+More than 20 additional flexible rooms.
+
+Suitable for:
+- Workshops.
+- Subgroups.
+- Breakout sessions.
+- Parallel meetings.
+
+Individual room capacities:
+Unconfirmed.
+
+Do not assume all rooms can be booked simultaneously.
+
+## 5.12 Outdoor Area
+
+Area:
+300 m².
+
+Maximum capacity:
+250 people.
+
+Suitable for:
+- Outdoor activities.
+- Team building.
+- Outdoor events.
+- Social gatherings.
+
+Weather and availability must be checked.
+
+## 5.13 H20 facilities
+
+Gaming:
+- More than 100 gaming units.
+- Gaming PCs.
+- Consoles.
+- Nintendo area.
+- Japanese Arcade experience.
+
+Simracing and VR:
+- Sim racing simulators.
+- Virtual Reality.
+- Augmented Reality.
+
+Parking:
+- More than 550 free parking spaces in the immediate surroundings.
+
+Catering and production:
+- In-house bar.
+- Catering possibilities.
+- Livestream production.
+- Video production facilities.
+
+---
+
+# PART 6 – ROOM FINDER AND RECOMMENDATION ENGINE
+
+Build an intelligent room recommendation engine.
+
+Analyse:
+
+1. Group size.
+2. Event type.
+3. Available capacity information.
+4. Preferred atmosphere.
+5. Required facilities.
+6. Indoor or outdoor preference.
+7. Activity requirements.
+8. Date and time.
+9. Actual availability, when connected.
+
+Rank suitable rooms based on how well they match the customer's needs.
+
+Display the three best matches when possible.
+
+Each result must explain:
+
+- Why the room is recommended.
+- Which requirements it satisfies.
+- Its known capacity.
+- Its facilities.
+- Any information that still requires confirmation.
+
+Allow customers to compare rooms side by side.
+
+Do not recommend a room as suitable when its known capacity is insufficient.
+
+For unknown capacities, clearly show that H20 must confirm suitability.
+
+---
+
+# PART 7 – AI ENGINE AND SKILLS ARCHITECTURE
+
+Create a modular AI architecture.
+
+Use an existing suitable AI language model through a secure API.
+
+Do not attempt to build a language model from scratch.
+
+Create separate reusable skills.
+
+## Skill 1 – Customer Information Collector
+
+Collects and validates customer information.
+
+Asks follow-up questions when necessary.
+
+## Skill 2 – Room Finder
+
+Searches the H20 venue database.
+
+Filters rooms according to capacity, event type and facilities.
+
+## Skill 3 – Activity Recommendation
+
+Recommends suitable activities based on the event.
+
+## Skill 4 – Budget Calculator
+
+Uses verified prices and application-side calculations.
+
+Never estimates unknown prices.
+
+## Skill 5 – Catering Assistant
+
+Finds suitable catering options using verified information.
+
+## Skill 6 – Event Planner
+
+Creates a logical event timeline.
+
+## Skill 7 – Proposal Generator
+
+Creates a structured professional event proposal.
+
+## Skill 8 – Proposal Checker
+
+Checks the completeness and accuracy of proposals.
+
+## Skill 9 – Booking Assistant
+
+Helps customers select dates, rooms and booking details.
+
+## Skill 10 – Admin Support
+
+Helps authorised administrators retrieve booking and room information.
+
+The administrator must retain control over important changes.
+
+## AI knowledge retrieval
+
+Implement a RAG-style knowledge system.
+
+The AI must search the H20 knowledge base before answering questions about:
+
+- Rooms.
+- Capacities.
+- Activities.
+- Prices.
+- Facilities.
+- Event rules.
+- Availability.
+
+Use document search or database retrieval.
+
+Allow administrators to upload and update PDF, DOCX and Excel information files.
+
+The AI must use the newest approved information.
+
+Do not train or fine-tune a model unnecessarily. Start with instructions, skills and reliable knowledge retrieval.
+
+---
+
+# PART 8 – AI CHAT ASSISTANT
+
+Create a separate AI chat interface.
+
+Customers can ask natural questions.
+
+Examples:
+
+- Can you organise a gaming event for 30 people?
+- Which room is best for 100 people?
+- Can you make the event cheaper?
+- Can you add VR activities?
+- Can you suggest another room?
+- Can you change the event date?
+- Can you create a different schedule?
+
+Chat functionality:
+- Message history.
+- AI typing indicator.
+- Modern chat bubbles.
+- Suggested questions.
+- Send button.
+- New conversation.
+- Clear conversation.
+- Context awareness.
+
+The AI must understand the customer's existing event configuration.
+
+If the customer asks for changes, update the proposal rather than starting over unnecessarily.
+
+---
+
+# PART 9 – EVENT PROPOSAL GENERATOR
+
+Generate a professional proposal after the customer completes the event builder.
+
+Every proposal must contain:
+
+## Event overview
+
+- Event name.
+- Event type.
+- Number of participants.
+- Date.
+- Duration.
+- Budget.
+
+## Venue recommendation
+
+- Recommended room.
+- Room specifications.
+- Capacity.
+- Reason for recommendation.
+
+## Activities
+
+- Selected activities.
+- Descriptions.
+- Durations, when known.
+
+## Catering
+
+- Selected options.
+- Known prices.
+- Missing price information.
+
+## Budget breakdown
+
+Display:
+
+- Venue costs.
+- Activity costs.
+- Catering costs.
+- Additional costs.
+- VAT, when applicable.
+- Total.
+- Remaining budget.
+
+All calculations must be performed by application code using verified prices.
+
+## Event timeline
+
+Generate a visual schedule.
+
+Example:
+
+09:00 – Arrival.
+
+09:30 – Introduction.
+
+10:00 – Gaming activities.
+
+11:30 – Break.
+
+12:00 – Lunch.
+
+13:00 – Team challenges.
+
+14:30 – Closing.
+
+These are illustrative times, not confirmed H20 schedules.
+
+## Final checks
+
+Display:
+- Missing information.
+- Availability verification.
+- Capacity verification.
+- Prices requiring confirmation.
+- Items requiring H20 approval.
+
+Allow customers to save, edit and continue to booking.
+
+---
+
+# PART 10 – BOOKING AND RESERVATION SYSTEM
+
+Create a complete event booking system.
+
+Customers must be able to reserve their proposed event.
+
+## 10.1 Booking process
+
+After generating an event proposal, display:
+
+"Book This Event"
+
+The customer then proceeds through:
+
+1. Date selection.
+2. Time selection.
+3. Room confirmation.
+4. Customer information.
+5. Booking summary.
+6. Availability verification.
+7. Payment.
+8. Booking confirmation.
+
+## 10.2 Date picker
+
+Create a modern interactive calendar.
+
+Allow customers to:
+- Select a date.
+- Select alternative dates.
+- Choose a starting time.
+- Choose an ending time.
+
+Display availability indicators:
+
+- Green: Verified available.
+- Red: Booked.
+- Orange: Pending.
+- Grey: Unavailable.
+- Blue: Selected.
+
+Never display a date as available without a real availability check.
+
+When no booking system is connected, display:
+
+"Availability has not been checked yet. H20 must confirm your requested date."
+
+## 10.3 Customer details
+
+Collect:
+
+- First name.
+- Last name.
+- Company name.
+- Email.
+- Phone.
+- Billing address.
+- Postal code.
+- City.
+- Country.
+
+Validate all required fields.
+
+## 10.4 Booking summary
+
+Show:
+
+- Event details.
+- Selected room.
+- Date.
+- Time.
+- Number of participants.
+- Activities.
+- Catering.
+- Total price.
+- Payment status.
+- Booking status.
+
+Allow the customer to edit information before submission.
+
+## 10.5 Booking statuses
+
+Create:
+
+- Draft.
+- Awaiting Availability.
+- Awaiting H20 Approval.
+- Awaiting Payment.
+- Payment Processing.
+- Paid.
+- Confirmed.
+- Cancelled.
+- Refunded.
+
+Never automatically treat a proposal as a confirmed reservation.
+
+---
+
+# PART 11 – ONLINE PAYMENT SYSTEM
+
+Integrate a secure payment provider such as Stripe.
+
+Investigate support for:
+
+- iDEAL.
+- Credit cards.
+- Debit cards.
+- Apple Pay.
+- Google Pay.
+
+Only show payment methods that are actually enabled and supported.
+
+## Payment functionality
+
+Customers must be able to:
+
+- Review their order.
+- Select a payment method.
+- Pay securely.
+- Receive payment confirmation.
+
+Show:
+- Booking reference.
+- Event details.
+- Total price.
+- VAT breakdown where applicable.
+- Payment method.
+- Payment status.
+
+Use secure hosted checkout.
+
+Technical requirements:
+
+- Never store raw card information.
+- Keep secret API keys on the server.
+- Verify payments through server-side webhooks.
+- Prevent duplicate payments.
+- Maintain payment history.
+- Support refunds through authorised administrative actions.
+
+Never mark an order as paid based only on a browser message.
+
+If payment credentials are unavailable, build the integration structure and clearly explain what must be connected.
+
+---
+
+# PART 12 – EMAIL NOTIFICATIONS
+
+Create automated email notifications.
+
+Send appropriate emails for:
+
+- Booking request received.
+- Availability confirmed.
+- Booking awaiting approval.
+- Payment received.
+- Booking confirmed.
+- Booking changed.
+- Booking cancelled.
+- Payment refunded.
+
+Example:
+
+Subject: Your H20 Event Booking
+
+Dear [Customer Name],
+
+Thank you for choosing H20.
+
+Your booking request has been received.
+
+Booking reference: [Booking Reference]
+
+Event: [Event Name]
+
+Date: [Event Date]
+
+Room: [Room Name]
+
+Payment status: [Payment Status]
+
+We will contact you if additional confirmation is required.
+
+Kind regards,
+H20 Event Team
+
+Only send emails after the relevant operation succeeds.
+
+---
+
+# PART 13 – ADMIN CONTROL PANEL
+
+Create a completely separate administrator environment.
+
+The admin panel must have its own login and protected access.
+
+## 13.1 Admin login
+
+Initial prototype credentials:
+
+Username: admin
+
+Password: 33345612
+
+The initial password must be configured securely on the backend.
+
+Security requirements:
+- Never hardcode the password in public frontend files.
+- Store password hashes, not plaintext passwords.
+- Use secure sessions.
+- Add logout.
+- Expire inactive sessions.
+- Restrict all admin routes.
+- Prevent ordinary customers from accessing admin functions.
+
+For production, require a secure password change and preferably stronger authentication.
+
+## 13.2 Admin dashboard
+
+Create a professional dashboard showing:
+
+- Total rooms.
+- Booked rooms.
+- Available rooms.
+- Unavailable rooms.
+- Pending bookings.
+- Confirmed bookings.
+- Upcoming events.
+- Total booking requests.
+- Payment overview.
+
+Use visual statistics and charts.
+
+## 13.3 Admin navigation
+
+Create a sidebar:
+
+1. Dashboard.
+2. Room Management.
+3. Booking Calendar.
+4. Reservations.
+5. Availability Management.
+6. Customer Management.
+7. Payments.
+8. Knowledge Base.
+9. AI Settings.
+10. Activity Log.
+11. General Settings.
+12. Logout.
+
+---
+
+# PART 14 – ADMIN ROOM MANAGEMENT
+
+Display every H20 room.
+
+The administrator must be able to:
+
+- View rooms.
+- Edit room information.
+- Change verified capacities.
+- Upload photographs.
+- Edit descriptions.
+- Edit facilities.
+- Activate rooms.
+- Deactivate rooms.
+- Temporarily close rooms.
+- View upcoming bookings.
+
+Every room must have a detailed management page.
+
+When changing unknown capacity information, require the administrator to confirm that the new information has been verified.
+
+---
+
+# PART 15 – ADMIN BOOKING CALENDAR
+
+This is one of the most important administrative functions.
+
+Create a central calendar showing exactly which room is booked on which date and at which time.
+
+Provide:
+
+## Monthly view
+
+Show all reservations for the selected month.
+
+## Weekly view
+
+Show reservations across the selected week.
+
+## Daily view
+
+Show all reservations on the selected date, including start and end times.
+
+## Room filters
+
+Allow filtering by:
+
+- Rabo Esports Stadium.
+- H20 Lounge Café.
+- Aula.
+- Rabo Meeting Room.
+- Aquarium.
+- Community Area.
+- Predator Gaming Room.
+- XXL Meeting Room.
+- VRgaderruimte.
+- Breakout Rooms.
+- Outdoor Area.
+
+Also include an All Rooms option.
+
+## Calendar colours
+
+- Green: Verified available.
+- Red: Booked.
+- Orange: Pending confirmation.
+- Grey: Unavailable.
+- Blue: Selected.
+
+Click a reservation to see:
+
+- Booking reference.
+- Customer name.
+- Event name.
+- Room.
+- Date.
+- Start time.
+- End time.
+- Participants.
+- Payment status.
+- Booking status.
+
+The administrator must be able to see all room reservations from one central calendar.
+
+---
+
+# PART 16 – ADMIN AVAILABILITY CONTROL
+
+Allow administrators to manually manage room availability.
+
+For every room, provide:
+
+- Mark Available.
+- Mark Unavailable.
+- Temporarily Close.
+- Block Date.
+- Block Time Period.
+- Add Maintenance.
+- Reopen Date.
+
+Example:
+
+Room: Rabo Esports Stadium.
+
+Date: 15 December 2026.
+
+Time: 09:00–17:00.
+
+Status: Unavailable.
+
+Reason: Private event.
+
+When the administrator saves a change:
+
+1. Update the database.
+2. Update the calendar.
+3. Update customer-facing availability.
+4. Update the AI knowledge available to the assistant.
+5. Prevent conflicting reservations.
+
+If a confirmed booking already exists, show a warning and require the administrator to resolve the conflict.
+
+Never silently overwrite an existing reservation.
+
+---
+
+# PART 17 – ADMIN RESERVATION MANAGEMENT
+
+Create a complete reservation table.
+
+Columns:
+
+- Booking reference.
+- Customer.
+- Event name.
+- Room.
+- Date.
+- Time.
+- Participants.
+- Booking status.
+- Payment status.
+
+Administrators can:
+
+- View reservations.
+- Approve bookings.
+- Reject bookings.
+- Cancel bookings.
+- Change dates.
+- Change rooms.
+- Edit event details.
+- Add internal notes.
+- View payment information.
+- Review customer information.
+
+All changes must be saved to the database.
+
+Maintain a complete booking history.
+
+---
+
+# PART 18 – CUSTOMER MANAGEMENT
+
+Create a customer management page.
+
+Administrators can:
+
+- View customers.
+- Search customers.
+- Filter customers.
+- View customer bookings.
+- View customer contact details.
+- View booking history.
+- View payment history.
+- Add internal notes.
+
+Protect all customer information.
+
+Do not allow unauthorised users to access customer records.
+
+---
+
+# PART 19 – ADMIN KNOWLEDGE BASE MANAGEMENT
+
+Create an administration section for H20 information.
+
+Administrators can:
+
+- Add rooms.
+- Edit rooms.
+- Add activities.
+- Edit activities.
+- Add catering information.
+- Add verified prices.
+- Upload PDFs.
+- Upload DOCX files.
+- Upload Excel files.
+- Edit descriptions.
+- Update facilities.
+- Update verified capacities.
+- Publish updated information.
+
+Every information item must have a status:
+
+- Draft.
+- Pending Review.
+- Approved.
+- Archived.
+
+The AI must use approved information only.
+
+Store the date of the latest update.
+
+---
+
+# PART 20 – ADMIN AI SETTINGS
+
+Create an AI settings page.
+
+Allow administrators to manage:
+
+- AI instructions.
+- AI personality.
+- Available skills.
+- Knowledge sources.
+- AI response settings.
+- Proposal templates.
+- AI test scenarios.
+
+Create a testing interface where an administrator can enter a customer question and see how the AI responds.
+
+Allow the administrator to check whether the response follows the H20 accuracy rules.
+
+Do not expose private API keys in the frontend.
+
+---
+
+# PART 21 – ADMIN ACTIVITY LOG
+
+Record every important administrative action.
+
+Store:
+
+- Administrator.
+- Action.
+- Previous value.
+- New value.
+- Related room or booking.
+- Date.
+- Time.
+
+Examples:
+
+"Administrator changed Rabo Esports Stadium availability."
+
+"Administrator approved booking H20-001."
+
+"Administrator changed the Aula booking date."
+
+"Administrator updated room capacity."
+
+Only authorised administrators can access the log.
+
+---
+
+# PART 22 – STRICT H20 DATA ACCURACY GOVERNANCE
+
+These rules are mandatory throughout the application.
+
+All AI answers, room cards, booking pages, proposals and administrative interfaces must respect these data boundaries.
+
+## Confirmed information
+
+- Rabo Esports Stadium: 50–1,200.
+- H20 Lounge Café: 30–200.
+- Aula: 10–60.
+- Predator Gaming Room: 10–15.
+- Community Area: approximately 10.
+- Outdoor Area: 300 m², up to 250 people.
+- More than 550 free parking spaces in the immediate surroundings.
+
+## Unknown information
+
+Aquarium:
+"Capacity requires confirmation."
+
+Rabo Meeting Room:
+"100+ people. Maximum capacity to be confirmed by H20."
+
+XXL Meeting Room:
+"Exact capacity must be confirmed."
+
+VRgaderruimte:
+"Exact capacity must be confirmed."
+
+Breakout Rooms:
+"20+ rooms. Individual capacities are unconfirmed."
+
+Catering:
+"Price information is not currently available."
+
+## Live information
+
+Availability:
+"Availability has not been checked yet."
+
+Outdoor:
+"Weather conditions and availability need to be checked."
+
+Breakout Rooms:
+"Never assume all rooms are available simultaneously."
+
+Important notice:
+
+"A room recommendation is not a confirmed reservation."
+
+## Mandatory AI rules
+
+- Never invent prices.
+- Never invent capacities.
+- Never invent room specifications.
+- Never invent available dates.
+- Never claim a booking is confirmed without confirmation.
+- Never claim a payment succeeded without verified payment information.
+- Clearly identify missing information.
+- Use only approved H20 information.
+- Distinguish static information from live information.
+
+---
+
+# PART 23 – DATABASE AND TECHNICAL ARCHITECTURE
+
+Build a proper full-stack application.
+
+Recommended architecture:
+
+Frontend:
+- React.
+- TypeScript.
+- Tailwind CSS.
+- Modern reusable UI components.
+
+Backend:
+- Secure server-side application.
+- REST API or equivalent.
+- Authentication.
+- Booking logic.
+- Payment integration.
+- AI integration.
+
+Database:
+Use a suitable relational database such as PostgreSQL.
+
+Create separate database structures for:
+
+1. Users.
+2. Customers.
+3. Administrator accounts.
+4. Rooms.
+5. Activities.
+6. Catering.
+7. Prices.
+8. Knowledge documents.
+9. Event proposals.
+10. Bookings.
+11. Payments.
+12. Availability blocks.
+13. Booking history.
+14. Activity logs.
+15. Email notifications.
+
+Use proper relationships between tables.
+
+## Important backend requirements
+
+- Validate all inputs.
+- Protect customer information.
+- Use role-based permissions.
+- Prevent double bookings.
+- Use database transactions.
+- Prevent duplicate payment processing.
+- Verify payment webhooks.
+- Keep API secrets server-side.
+- Handle errors correctly.
+- Store all important changes.
+- Ensure changes persist after refreshing the application.
+
+Use real database operations, not just frontend state.
+
+---
+
+# PART 24 – INTEGRATION AND SYNCHRONISATION
+
+All application modules must work together.
+
+Connect:
+
+- AI Event Builder.
+- AI Chat.
+- Room Finder.
+- H20 Knowledge Base.
+- Proposal Generator.
+- Booking System.
+- Payment System.
+- Customer Dashboard.
+- Admin Dashboard.
+- Booking Calendar.
+
+Example:
+
+When an administrator blocks the Rabo Esports Stadium for a specific date:
+
+1. The database saves the block.
+2. The admin calendar updates.
+3. The customer booking system updates.
+4. The AI receives the updated availability.
+5. The AI stops presenting that time as available.
+6. Alternative suitable rooms can be suggested.
+
+All changes must remain synchronised.
+
+---
+
+# PART 25 – ERROR HANDLING AND SECURITY
+
+Implement:
+
+- Secure authentication.
+- Role-based access.
+- Input validation.
+- Protected admin routes.
+- Secure session management.
+- Database access control.
+- Payment verification.
+- Rate limiting where appropriate.
+- Protection against duplicate requests.
+- Clear error messages.
+- Privacy-conscious data collection.
+
+If a service is not connected, show a clear explanation rather than pretending it works.
+
+---
+
+# PART 26 – COMPLETE TESTING
+
+Create a comprehensive testing process.
+
+Test the following:
+
+## AI tests
+
+1. Customer requests a gaming event for 12 people.
+2. Customer requests a conference for 500 people.
+3. Customer requests a networking event for 100 people.
+4. Customer requests a workshop for 8 people.
+5. Customer has an insufficient budget.
+6. Customer requests an unknown activity.
+7. Customer asks for an unknown room capacity.
+
+## Booking tests
+
+1. Customer selects an event date.
+2. Customer selects an unavailable date.
+3. Customer submits a booking request.
+4. Customer changes the date.
+5. Customer receives the correct booking status.
+6. Two customers attempt to book the same room at the same time.
+
+## Payment tests
+
+1. Successful payment.
+2. Failed payment.
+3. Cancelled checkout.
+4. Duplicate payment attempt.
+5. Refund.
+6. Incorrect payment webhook.
+
+## Admin tests
+
+1. Correct admin login.
+2. Incorrect admin password.
+3. Admin opens the booking calendar.
+4. Admin checks a specific room on a specific date.
+5. Admin blocks a room.
+6. Admin reopens a room.
+7. Admin approves a booking.
+8. Admin detects a booking conflict.
+9. Admin updates room information.
+10. Admin uploads a knowledge document.
+
+## Synchronisation tests
+
+1. Availability changes in the admin dashboard.
+2. Customer-facing availability updates.
+3. AI receives the correct information.
+4. Booking calendar reflects the change.
+5. Changes remain after refreshing.
+
+Document failed tests and fix them before declaring the application complete.
+
+---
+
+# PART 27 – FINAL USER EXPERIENCE
+
+The application must provide two clearly separated experiences.
+
+## CUSTOMER EXPERIENCE
+
+Customers can:
+
+1. Explore H20.
+2. Discover rooms.
+3. Build events.
+4. Chat with AI.
+5. Receive recommendations.
+6. Compare proposals.
+7. Select a date.
+8. Submit a booking.
+9. Pay securely.
+10. Receive confirmations.
+11. Manage their reservations.
+
+## ADMIN EXPERIENCE
+
+Administrators can:
+
+1. Log in securely.
+2. View dashboard statistics.
+3. Manage every H20 room.
+4. See all bookings.
+5. View bookings by date and time.
+6. Change availability.
+7. Block rooms.
+8. Approve or reject bookings.
+9. Manage customers.
+10. Manage payments.
+11. Manage H20 knowledge.
+12. Configure and test the AI.
+13. Review activity logs.
+
+---
+
+# PART 28 – FINAL DEVELOPMENT INSTRUCTIONS
+
+IMPORTANT DEVELOPMENT RULES:
+
+1. Build the actual application, not just a design.
+2. Preserve all working features.
+3. Implement a real database.
+4. Implement real authentication.
+5. Implement real booking logic.
+6. Implement actual availability management.
+7. Integrate a real AI API when credentials are supplied.
+8. Integrate a real payment provider when credentials are supplied.
+9. Implement real server-side operations.
+10. Never fake a successful payment.
+11. Never fake live availability.
+12. Never invent H20 information.
+13. Do not expose private credentials.
+14. Make the interface fully responsive.
+15. Maintain consistent branding.
+
+If external credentials or H20 systems are not available, build the integration points and clearly mark them as requiring configuration.
+
+Use clearly labelled demo data for testing only.
+
+Do not confuse demo data with real bookings.
+
+## DEVELOPMENT PRIORITY
+
+Build the application in this order:
+
+Phase 1:
+- Design system.
+- Homepage.
+- Customer interface.
+- Room database.
+- Room Finder.
+
+Phase 2:
+- AI integration.
+- AI skills.
+- Knowledge retrieval.
+- Event Builder.
+- Proposal Generator.
+
+Phase 3:
+- Customer accounts.
+- Booking system.
+- Date selection.
+- Availability management.
+- Booking calendar.
+
+Phase 4:
+- Payment integration.
+- Email notifications.
+- Booking confirmations.
+
+Phase 5:
+- Admin Control Panel.
+- Room management.
+- Reservation management.
+- Customer management.
+- Knowledge management.
+- AI settings.
+- Activity logs.
+
+Phase 6:
+- Full testing.
+- Security checks.
+- Performance improvements.
+- Responsive design improvements.
+
+Do not stop after creating the homepage. Continue implementing the actual application modules.
+
+If a task is too large for one generation, work through the phases while preserving the existing code and functionality.
+
+---
+
+# FINAL PRODUCT GOAL
+
+Create a complete, premium-quality H20 AI Event Assistant.
+
+The result must be a professional AI-powered event planning, booking and administration platform.
+
+It must allow customers to plan events, receive intelligent recommendations, select rooms, request dates, pay online and manage bookings.
+
+It must allow H20 administrators to manage rooms, see exactly which rooms are booked on which dates, change availability, approve reservations, manage customers and maintain the AI knowledge base.
+
+The complete application must be modern, reliable, secure, intuitive, visually impressive and ready for further real-world development.
+
+Finally, display the small creator credit:
+
+"Made by Germain"
+
+in the bottom-left corner of every application page.
+
+Do not remove this credit.
+
+The finished product should feel like a professionally developed commercial AI platform, not a basic school project.

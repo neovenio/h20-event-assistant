@@ -1,0 +1,433 @@
+<div class="section-heading">
+  <div>
+    <span class="eyebrow">EMPLOYEE PORTAL</span>
+    <h1>Evenementen beheren</h1>
+    <p class="muted">
+      {{
+        store.live()
+          ? 'Binnengekomen aanvragen en voorlopige planningen.'
+          : 'Demo-omgeving · wijzigingen worden alleen in deze browser opgeslagen.'
+      }}
+    </p>
+  </div>
+  <button (click)="logout.emit()">{{ store.live() ? 'Uitloggen' : 'Demo sluiten' }}</button>
+</div>
+<nav class="subnav" aria-label="Beheer">
+  @for (item of tabs; track item.id) {
+    <button [class.active]="tab() === item.id" (click)="tab.set(item.id)">{{ item.label }}</button>
+  }
+</nav>
+@if (error) {
+  <p class="error" role="alert">{{ error }}</p>
+}
+@if (success) {
+  <p class="success" role="status">{{ success }}</p>
+}
+@switch (tab()) {
+  @case ('bookings') {
+    <div class="stats">
+      <div class="panel">
+        <small>Aanvragen</small><strong>{{ store.bookings().length }}</strong>
+      </div>
+      <div class="panel">
+        <small>Geselecteerd</small><strong>{{ filtered().length }}</strong
+        ><small>huidige selectie</small>
+      </div>
+      <div class="panel">
+        <small>Zalen</small><strong>{{ store.activeRooms().length }}</strong>
+      </div>
+    </div>
+    <div class="toolbar">
+      <label
+        >Zoeken<input
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+          placeholder="Naam, bedrijf, referentie…" /></label
+      ><label
+        >Status<select [ngModel]="status()" (ngModelChange)="status.set($event)">
+          <option value="">Alle statussen</option>
+          @for (s of statuses; track s) {
+            <option>{{ s }}</option>
+          }
+        </select></label
+      ><label
+        >Zaal<select [ngModel]="roomFilter()" (ngModelChange)="roomFilter.set($event)">
+          <option value="">Alle zalen</option>
+          @for (room of store.rooms(); track room.id) {
+            <option [value]="room.id">{{ room.name }}</option>
+          }
+        </select></label
+      ><button (click)="exportCsv()">CSV export</button
+      ><button (click)="refresh()" [disabled]="busy || !store.live()">Vernieuwen</button
+      ><button class="primary" (click)="newBooking.emit()">+ Nieuwe aanvraag</button>
+    </div>
+    <div class="panel table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Referentie</th>
+            <th>Evenement / klant</th>
+            <th>Datum / zaal</th>
+            <th>Personen</th>
+            <th>Indicatie</th>
+            <th>Status</th>
+            <th>Actie</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (b of filtered(); track b.id) {
+            <tr>
+              <td>{{ b.reference }}</td>
+              <td>
+                <strong>{{ b.event.name }}</strong
+                ><small>{{ b.customer.fullName }} · {{ b.customer.company }}</small>
+              </td>
+              <td>
+                {{ b.event.date | date: 'dd-MM-yyyy' }}<small>{{ b.event.room.name }}</small>
+              </td>
+              <td>{{ b.event.participants }}</td>
+              <td>{{ b.financial.totalPrice | currency: 'EUR' }}</td>
+              <td>
+                <span class="status-pill">{{
+                  b.requestStatus || b.reservation.bookingStatus
+                }}</span>
+              </td>
+              <td><button (click)="selectBooking.emit(b)">Bekijk</button></td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="7">Geen aanvragen gevonden.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+  @case ('calendar') {
+    <div class="section-heading">
+      <h2>{{ month() | date: 'MMMM yyyy' }}</h2>
+      <div class="actions">
+        <button aria-label="Vorige maand" (click)="shiftMonth(-1)">←</button
+        ><button aria-label="Volgende maand" (click)="shiftMonth(1)">→</button>
+      </div>
+    </div>
+    <div class="calendar">
+      @for (day of ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo']; track day) {
+        <strong>{{ day }}</strong>
+      }
+      @for (day of days(); track day.date) {
+        <button
+          class="calendar-day"
+          [class.muted]="!day.current"
+          [class.selected]="selectedDate() === day.date"
+          (click)="selectedDate.set(day.date)"
+        >
+          <span>{{ day.day }}</span>
+          @if (day.bookings.length) {
+            <small>{{ day.bookings.length }} aanvragen</small>
+          }
+          @if (day.blocks.length) {
+            <small class="warning">{{ day.blocks.length }} blokkades</small>
+          }
+        </button>
+      }
+    </div>
+    <h3>{{ selectedDate() | date: 'dd-MM-yyyy' }}</h3>
+    @for (b of dayBookings(); track b.id) {
+      <button class="calendar-event" (click)="selectBooking.emit(b)">
+        {{ b.event.startTime }}–{{ b.event.endTime }} · {{ b.event.name }} · {{ b.event.room.name }}
+      </button>
+    } @empty {
+      <p class="muted">Geen aanvragen op deze dag.</p>
+    }
+  }
+  @case ('availability') {
+    <section class="panel">
+      <h2>Zaal blokkeren</h2>
+      <form (ngSubmit)="createBlock()">
+        <div class="form-grid">
+          <label
+            >Zaal<select name="room" [(ngModel)]="block.roomId" required>
+              <option value="">Selecteer zaal</option>
+              @for (room of store.rooms(); track room.id) {
+                <option [value]="room.id">{{ room.name }}</option>
+              }
+            </select></label
+          ><label>Datum<input type="date" name="date" [(ngModel)]="block.date" required /></label
+          ><label
+            >Van<input type="time" name="start" [(ngModel)]="block.startTime" required /></label
+          ><label>Tot<input type="time" name="end" [(ngModel)]="block.endTime" required /></label
+          ><label>Reden<input name="reason" [(ngModel)]="block.reason" required /></label
+          ><label
+            >Type<select name="type" [(ngModel)]="block.type">
+              @for (
+                type of ['Maintenance', 'Private Event', 'Closure', 'Admin Block'];
+                track type
+              ) {
+                <option>{{ type }}</option>
+              }
+            </select></label
+          >
+        </div>
+        <button class="primary" [disabled]="busy">Blokkade opslaan</button>
+      </form>
+    </section>
+    <div class="stack">
+      @for (block of store.blocks(); track block.id) {
+        <article class="panel section-heading">
+          <div>
+            <strong>{{ block.roomName }}</strong>
+            <p>{{ block.date }} · {{ block.startTime }}–{{ block.endTime }} · {{ block.reason }}</p>
+          </div>
+          <button class="danger" (click)="deleteBlock(block.id)" [disabled]="busy">
+            Verwijderen
+          </button>
+        </article>
+      }
+    </div>
+  }
+  @case ('customers') {
+    <div class="stack">
+      @for (customer of customers(); track customer.email) {
+        <details class="panel">
+          <summary>
+            <strong>{{ customer.fullName }}</strong> · {{ customer.company }} · {{ customer.email }}
+          </summary>
+          <p>{{ customer.phone }}</p>
+          @for (b of customerBookings(customer.email); track b.id) {
+            <button class="calendar-event" (click)="selectBooking.emit(b)">
+              {{ b.event.date }} · {{ b.event.name }} · {{ b.reservation.bookingStatus }}
+            </button>
+          }
+        </details>
+      } @empty {
+        <p class="empty">Nog geen klanten.</p>
+      }
+    </div>
+  }
+  @case ('rooms') {
+    <div class="card-grid">
+      @for (room of store.rooms(); track room.id) {
+        <article class="card">
+          <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+          <div class="card-body">
+            <span class="badge">{{ room.isActive ? 'Actief' : 'Inactief' }}</span>
+            <h3>{{ room.name }}</h3>
+            <p>{{ room.capacityDisplay }}</p>
+            <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur</p>
+            <button (click)="openRoom(room)">Zaal bewerken</button>
+          </div>
+        </article>
+      }
+    </div>
+  }
+  @case ('catering') {
+    <div class="section-heading">
+      <h2>Cateringpakketten</h2>
+      <button (click)="newCatering()">+ Catering</button>
+    </div>
+    <div class="card-grid">
+      @for (item of store.catering(); track item.id) {
+        <article class="panel">
+          <h3>{{ item.name }}</h3>
+          <p>{{ item.description }}</p>
+          <p class="warning">{{ item.priceDisplay }}</p>
+          <div class="actions">
+            <button (click)="openCatering(item)">Bewerken</button
+            ><button class="danger" (click)="deleteItem(item.id, 'catering')" [disabled]="busy">
+              Verwijderen
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+    <div class="section-heading">
+      <h2>Event upgrades</h2>
+      <button (click)="newUpgrade()">+ Upgrade</button>
+    </div>
+    <div class="card-grid">
+      @for (item of store.upgrades(); track item.id) {
+        <article class="panel">
+          <h3>{{ item.name }}</h3>
+          <p>{{ item.description }}</p>
+          <p>{{ item.priceDisplay }}</p>
+          <div class="actions">
+            <button (click)="openUpgrade(item)">Bewerken</button
+            ><button class="danger" (click)="deleteItem(item.id, 'upgrade')" [disabled]="busy">
+              Verwijderen
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+  }
+  @case ('ai') {
+    <section class="panel">
+      <h2>AI & verbinding</h2>
+      <p>{{ store.live() ? 'Verbonden met n8n' : 'Lokale demo actief' }}</p>
+      <p class="muted">
+        Het AI-model, de instructies en de API-sleutel worden uitsluitend in n8n beheerd.
+        Voorstellen blijven concepten totdat een medewerker ze beoordeelt.
+      </p>
+      <p>{{ store.api.baseUrl() || 'Geen webhook ingesteld' }}</p>
+    </section>
+    <app-assistant (build)="newBooking.emit()" />
+  }
+  @case ('sources') {
+    <h2>Officiële brongegevens</h2>
+    <p class="muted">
+      Controleer de opgehaalde beschrijving en foto vóór publicatie. Bewerk daarna capaciteit en
+      faciliteiten via Zaalbeheer. Publiceer de Event Zaal en het Rabo Stadium niet als twee
+      afzonderlijke zalen: dit kan dezelfde ruimte zijn.
+    </p>
+    <div class="stack">
+      @for (source of store.sources(); track source.id) {
+        <details class="panel">
+          <summary>{{ source.title || source.id }}</summary>
+          <a [href]="source.url" target="_blank" rel="noopener noreferrer"
+            >Bekijk officiële bron ↗</a
+          >
+          <p>{{ source.retrievedAt | date: 'dd-MM-yyyy HH:mm' }}</p>
+          @if (source.imageUrl) {
+            <img class="room-cover" [src]="source.imageUrl" [alt]="source.title" />
+          }
+          <p>{{ source.content }}</p>
+          @if (source.suggestedItem) {
+            <button (click)="publish(source)" [disabled]="busy">
+              Gecontroleerd: publiceer catalogusitem
+            </button>
+          }
+        </details>
+      } @empty {
+        <p class="empty">Voer de n8n-scraper uit om brongegevens op te halen.</p>
+      }
+    </div>
+  }
+  @case ('logs') {
+    <div class="panel table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Tijd</th>
+            <th>Medewerker</th>
+            <th>Actie</th>
+            <th>Onderdeel</th>
+            <th>Wijziging</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (log of store.logs(); track log.id) {
+            <tr>
+              <td>{{ log.timestamp | date: 'dd-MM-yyyy HH:mm' }}</td>
+              <td>{{ log.admin }}</td>
+              <td>{{ log.action }}</td>
+              <td>{{ log.relatedItem }}</td>
+              <td>{{ log.previousValue }} → {{ log.newValue }}</td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="5">Nog geen wijzigingen.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+}
+@if (editRoom) {
+  <app-modal heading="Zaal bewerken" (dismissed)="editRoom = null"
+    ><form (ngSubmit)="saveRoom()">
+      <div class="form-grid">
+        <label>Naam<input name="name" [(ngModel)]="editRoom.name" required /></label
+        ><label
+          >Maximumcapaciteit<input
+            type="number"
+            name="capacity"
+            [(ngModel)]="editRoom.maxCapacity"
+            min="1" /></label
+        ><label
+          >Capaciteitstekst<input name="display" [(ngModel)]="editRoom.capacityDisplay" /></label
+        ><label
+          >Uurtarief (€)<input
+            type="number"
+            name="rate"
+            [(ngModel)]="editRoom.baseHourlyRate"
+            min="0" /></label
+        ><label class="full"
+          >Beschrijving<textarea
+            name="description"
+            [(ngModel)]="editRoom.description"
+            rows="4"
+          ></textarea></label
+        ><label class="check"
+          ><input name="active" type="checkbox" [(ngModel)]="editRoom.isActive" /> Actief</label
+        ><label class="check"
+          ><input name="verified" type="checkbox" [(ngModel)]="editRoom.capacityVerified" />
+          Capaciteit gecontroleerd</label
+        >
+      </div>
+      @if (error) {
+        <p class="error">{{ error }}</p>
+      }
+      <button class="primary" [disabled]="busy">Opslaan</button>
+    </form></app-modal
+  >
+}
+@if (editCatering) {
+  <app-modal heading="Catering bewerken" (dismissed)="editCatering = null"
+    ><form (ngSubmit)="saveCatering()">
+      <div class="form-grid">
+        <label>Naam<input name="name" [(ngModel)]="editCatering.name" required /></label
+        ><label
+          >Prijs per persoon (leeg = op aanvraag)<input
+            type="number"
+            name="price"
+            [(ngModel)]="editCatering.pricePerPerson"
+            min="0"
+            step="0.01" /></label
+        ><label class="full"
+          >Beschrijving<textarea
+            name="description"
+            [(ngModel)]="editCatering.description"
+            rows="3"
+          ></textarea></label
+        ><label class="check"
+          ><input name="active" type="checkbox" [(ngModel)]="editCatering.isActive" /> Actief</label
+        >
+      </div>
+      @if (error) {
+        <p class="error">{{ error }}</p>
+      }
+      <button class="primary" [disabled]="busy">Opslaan</button>
+    </form></app-modal
+  >
+}
+@if (editUpgrade) {
+  <app-modal heading="Upgrade bewerken" (dismissed)="editUpgrade = null"
+    ><form (ngSubmit)="saveUpgrade()">
+      <div class="form-grid">
+        <label>Naam<input name="name" [(ngModel)]="editUpgrade.name" required /></label
+        ><label
+          >Prijs (leeg = op aanvraag)<input
+            type="number"
+            name="price"
+            [(ngModel)]="editUpgrade.price"
+            min="0"
+            step="0.01" /></label
+        ><label class="full"
+          >Beschrijving<textarea
+            name="description"
+            [(ngModel)]="editUpgrade.description"
+            rows="3"
+          ></textarea></label
+        ><label class="check"
+          ><input name="active" type="checkbox" [(ngModel)]="editUpgrade.isActive" /> Actief</label
+        >
+      </div>
+      @if (error) {
+        <p class="error">{{ error }}</p>
+      }
+      <button class="primary" [disabled]="busy">Opslaan</button>
+    </form></app-modal
+  >
+}

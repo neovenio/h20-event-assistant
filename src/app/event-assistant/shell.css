@@ -1,0 +1,374 @@
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+}
+.sidebar {
+  width: 238px;
+  flex-shrink: 0;
+  background: #0d1422;
+  border-right: 1px solid #202b3e;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 20px 18px;
+  z-index: 20;
+}
+.brand {
+  font-size: 38px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -2px;
+  color: #76c4f5;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+}
+.brand span {
+  font-size: 10px;
+  color: #66dbe7;
+  vertical-align: middle;
+  margin-left: 12px;
+}
+.brand-caption {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: #8498b6;
+  margin: 7px 0 35px;
+}
+.sidebar nav {
+  display: grid;
+  gap: 7px;
+}
+.sidebar nav button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #a4b1c6;
+  padding: 12px 11px;
+  font-size: 12px;
+}
+.sidebar nav button.active {
+  background: linear-gradient(105deg, #3566cc, #7a46cf);
+  border-color: #736de06b;
+  color: white;
+}
+.nav-icon {
+  font-size: 19px;
+  width: 21px;
+  text-align: center;
+}
+.sidebar nav .badge {
+  margin-left: auto;
+  font-size: 8px;
+  padding: 2px 5px;
+}
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.sidebar-bottom > a {
+  font-size: 11px;
+}
+.help-card {
+  padding: 15px;
+  background: #141e32;
+  border: 1px solid #2a3754;
+  border-radius: 14px;
+}
+.help-card h3 {
+  margin: 8px 0;
+  font-size: 13px;
+}
+.help-card p {
+  font-size: 11px;
+}
+.help-card button {
+  font-size: 11px;
+}
+.credit {
+  font-size: 10px;
+  color: #7f8da4;
+  border-top: 1px solid #253047;
+  padding-top: 12px;
+}
+.workspace {
+  flex: 1;
+  min-width: 0;
+}
+.topbar {
+  height: 70px;
+  border-bottom: 1px solid #222d40;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 30px;
+  font-size: 13px;
+}
+.mode-label {
+  font-size: 10px;
+  color: #a2b2cc;
+  background: #172136;
+  padding: 6px 10px;
+  border-radius: 20px;
+}
+.avatar {
+  border-radius: 50%;
+  padding: 8px 12px;
+  color: #d7c4ff;
+  background: #3b2c61;
+}
+.mobile-menu {
+  display: none;
+}
+main {
+  padding: 28px 30px 0;
+  max-width: 1850px;
+  margin: auto;
+}
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 25px;
+}
+.dashboard-main,
+.dashboard-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.hero {
+  border: 1px solid #35415a;
+  border-radius: 22px;
+  overflow: hidden;
+  min-height: 352px;
+  padding: 32px;
+  display: flex;
+  align-items: center;
+  background:
+    linear-gradient(90deg, #0b1121f5 0%, #0c1424df 44%, #0c14245a 100%),
+    url('/assets/aistudio/image_0751adcb.png') center/cover;
+}
+.hero-content {
+  max-width: 620px;
+}
+.hero h1 {
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 850;
+  line-height: 1.12;
+  margin: 20px 0;
+}
+.hero h1 span {
+  color: #b794fa;
+}
+.hero p {
+  font-size: 13px;
+  max-width: 490px;
+  color: #c8d1e0;
+  margin-bottom: 24px;
+}
+.hero .actions button {
+  font-size: 11px;
+  padding: 12px 14px;
+}
+.how-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.how-grid .panel {
+  padding: 17px;
+}
+.how-grid h3 {
+  font-size: 12px;
+  margin: 12px 0 6px;
+}
+.how-grid p {
+  font-size: 11px;
+  line-height: 1.7;
+}
+.step-icon {
+  background: #7040bd30;
+  color: #b79bff;
+  border: 1px solid #a17be94a;
+  border-radius: 10px;
+  display: inline-flex;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.dashboard-main .dashboard-rooms {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.dashboard-main .dashboard-rooms .card > img {
+  height: 140px;
+}
+.dashboard-main .dashboard-rooms .card-body {
+  padding: 15px;
+}
+.dashboard-main .dashboard-rooms h3 {
+  font-size: 13px;
+}
+.dashboard-main .dashboard-rooms p {
+  font-size: 11px;
+}
+.highlights {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 15px;
+  font-size: 12px;
+  color: #b7c4d9;
+}
+.highlights li::before {
+  content: '✓';
+  color: #8ed5d6;
+  margin-right: 10px;
+}
+.page-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 30px 0;
+  margin-top: 30px;
+  color: #8292ad;
+  font-size: 10px;
+  border-top: 1px solid #253047;
+}
+.floating-ai {
+  position: fixed;
+  bottom: 22px;
+  right: 24px;
+  border-radius: 30px;
+  padding: 13px 19px;
+  z-index: 25;
+  font-size: 13px;
+}
+.floating-ai span {
+  margin-left: 6px;
+}
+.mobile-backdrop {
+  display: none;
+}
+@media (min-width: 1550px) {
+  .dashboard-main .dashboard-rooms {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1250px) {
+  .sidebar {
+    width: 210px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-aside {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .hero {
+    min-height: 330px;
+  }
+  .hero h1 {
+    font-size: 40px;
+  }
+  .dashboard-main .dashboard-rooms {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .dashboard-main .dashboard-rooms {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboard-aside {
+    grid-template-columns: 1fr;
+  }
+  .how-grid {
+    grid-template-columns: 1fr;
+  }
+  .hero {
+    padding: 24px;
+  }
+  .hero h1 {
+    font-size: 34px;
+  }
+  main {
+    padding: 22px 20px 0;
+  }
+}
+@media (max-width: 700px) {
+  .sidebar {
+    position: fixed;
+    left: -260px;
+    transition: left 0.2s;
+    width: 245px;
+    z-index: 40;
+  }
+  .sidebar.mobile-open {
+    left: 0;
+  }
+  .mobile-menu {
+    display: block;
+  }
+  .mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: #0009;
+    z-index: 35;
+    border: 0;
+    border-radius: 0;
+  }
+  .topbar {
+    padding: 0 16px;
+    gap: 12px;
+    height: 62px;
+  }
+  .topbar > span {
+    font-size: 11px;
+  }
+  .mode-label {
+    font-size: 9px;
+  }
+  .hero h1 {
+    font-size: 32px;
+  }
+  .hero {
+    min-height: 380px;
+  }
+  .page-footer {
+    flex-direction: column;
+    padding-bottom: 75px;
+  }
+  .floating-ai {
+    right: 16px;
+    bottom: 16px;
+  }
+  .hero .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  main {
+    padding: 18px 16px 0;
+  }
+  .dashboard-main .dashboard-rooms .card-body {
+    padding: 12px;
+  }
+  .dashboard-main .dashboard-rooms .card > img {
+    height: 120px;
+  }
+  .dashboard-main,
+  .dashboard-aside {
+    gap: 22px;
+  }
+}

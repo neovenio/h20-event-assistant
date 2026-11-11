@@ -1,0 +1,384 @@
+:root {
+  --h20-black: #000000;
+  --h20-white: #ffffff;
+  --h20-magenta: #e1014b;
+  --h20-cyan: #5fc2d2;
+  --panel: #ffffff;
+  --line: #00000026;
+  --muted: #000000a6;
+  --purple: #e1014b;
+  --cyan: #5fc2d2;
+  color: #000;
+  background: #fff;
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+}
+body {
+  background: #fff;
+}
+h1,
+h2,
+h3,
+h4 {
+  color: #000;
+  letter-spacing: -0.035em;
+}
+h1 {
+  font-size: 44px;
+}
+p,
+small,
+label,
+.muted {
+  color: #000a;
+}
+a,
+.text-button {
+  color: #000;
+}
+.app-shell .sidebar {
+  background: #000;
+  color: #fff;
+  border: 0;
+}
+.brand {
+  width: 100%;
+  background: #000 !important;
+}
+.brand img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.brand-caption {
+  color: #fff9;
+  letter-spacing: 0.18em;
+}
+.sidebar nav button {
+  color: #fff;
+  border-radius: 0;
+}
+.sidebar nav button.active {
+  background: #e1014b;
+  border-color: #e1014b;
+}
+.sidebar nav button:hover {
+  background: #fff2;
+}
+.sidebar-bottom a,
+.sidebar-bottom .text-button,
+.sidebar-bottom p,
+.sidebar-bottom h3 {
+  color: #fff;
+}
+.help-card {
+  background: #000;
+  border-color: #fff5;
+  border-radius: 0;
+}
+.credit {
+  color: #fff9;
+}
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #0002;
+}
+.mode-label,
+.avatar {
+  background: #fff;
+  color: #000;
+  border: 1px solid #0003;
+}
+.desktop-toggle {
+  padding: 8px;
+  background: #fff;
+  color: #000;
+}
+.panel,
+.card,
+.choice {
+  background: #fff;
+  border: 1px solid #0003;
+  border-radius: 0;
+  box-shadow: none;
+}
+.panel p,
+.card p {
+  color: #000a;
+}
+.badge,
+.status-pill {
+  background: #fff;
+  color: #000;
+  border: 1px solid #0004;
+  border-radius: 0;
+}
+.primary,
+button.primary,
+.primary:hover:not(:disabled) {
+  background: #e1014b;
+  color: #fff;
+  border: 1px solid #e1014b;
+  box-shadow: none;
+  border-radius: 0;
+}
+button {
+  background: #fff;
+  color: #000;
+  border: 1px solid #0005;
+  border-radius: 0;
+}
+button:hover:not(:disabled) {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+.text-button:hover:not(:disabled) {
+  background: transparent;
+  color: #e1014b;
+}
+.hero {
+  background: #000;
+  border: 0;
+  border-radius: 0;
+  min-height: 390px;
+}
+.hero h1,
+.hero p {
+  color: #fff;
+}
+.hero h1 span {
+  color: #5fc2d2;
+}
+.hero .badge {
+  color: #fff;
+  background: #000;
+  border-color: #fff6;
+}
+.hero h1 {
+  font-size: 48px;
+  font-weight: 800;
+}
+.hero .hero-content {
+  max-width: 760px;
+}
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1fr) 310px;
+}
+.step-icon {
+  background: #5fc2d2;
+  color: #000;
+  border: 0;
+  border-radius: 0;
+}
+.chat-message,
+.chat-message.from-user {
+  background: #fff;
+  border-color: #0003;
+  border-radius: 0;
+}
+.chat-message.from-user {
+  border-left: 3px solid #e1014b;
+}
+.chat-message p,
+.chat-message small {
+  color: #000;
+}
+.chips button {
+  background: #fff;
+  color: #000;
+  border-color: #0005;
+  border-radius: 0;
+}
+.status-dot {
+  color: #000;
+}
+.highlights {
+  color: #000;
+}
+.highlights li::before {
+  color: #e1014b;
+}
+.warning {
+  color: #000;
+  font-weight: 600;
+}
+.notice {
+  background: #5fc2d226;
+  border: 1px solid #5fc2d2;
+  color: #000;
+  border-radius: 0;
+}
+.error {
+  background: #e1014b0d;
+  border: 1px solid #e1014b;
+  color: #000;
+  border-radius: 0;
+}
+.success {
+  color: #000;
+  border-left: 4px solid #5fc2d2;
+  padding: 12px;
+}
+.danger {
+  color: #e1014b;
+}
+input,
+textarea,
+select {
+  background: #fff;
+  color: #000;
+  border-color: #0005;
+  border-radius: 0;
+}
+.selected {
+  border-color: #e1014b !important;
+  box-shadow: inset 0 0 0 1px #e1014b;
+}
+.steps .current {
+  color: #e1014b;
+}
+.steps span {
+  background: #0001;
+  color: #000;
+}
+.steps .current span,
+.steps .done span {
+  background: #e1014b;
+  color: #fff;
+}
+.calendar-day {
+  background: #fff;
+}
+.calendar-day small {
+  color: #000;
+}
+.calendar-day:hover small {
+  color: #fff;
+}
+.subnav .active {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+.floating-ai {
+  border-radius: 0;
+}
+.page-footer {
+  color: #0009;
+}
+.facility-list {
+  color: #000;
+}
+.room-cover {
+  border-radius: 0;
+}
+.nav-collapsed .sidebar {
+  width: 76px;
+  padding: 25px 12px;
+}
+.nav-collapsed .sidebar .nav-label,
+.nav-collapsed .sidebar .badge,
+.nav-collapsed .sidebar-bottom,
+.nav-collapsed .brand-caption {
+  display: none;
+}
+.nav-collapsed .sidebar nav button {
+  justify-content: center;
+  padding: 12px;
+}
+.nav-collapsed .brand {
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+.nav-collapsed .brand img {
+  width: 240px;
+  max-width: none;
+}
+.sidebar app-icon {
+  flex-shrink: 0;
+}
+.nav-label {
+  flex: 1;
+  text-align: left;
+}
+th,
+td {
+  border-color: #0002;
+}
+th {
+  color: #0009;
+}
+.catalogue-emoji {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .desktop-toggle {
+    display: none;
+  }
+  .nav-collapsed .sidebar {
+    width: 245px;
+    padding: 30px 20px;
+  }
+  .nav-collapsed .sidebar .nav-label,
+  .nav-collapsed .sidebar-bottom,
+  .nav-collapsed .brand-caption {
+    display: flex;
+  }
+  .nav-collapsed .brand img {
+    width: 100%;
+  }
+  .hero h1 {
+    font-size: 36px;
+  }
+  .hero {
+    min-height: 380px;
+  }
+  h1 {
+    font-size: 30px;
+  }
+}
+
+.event-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 24px 0;
+}
+.event-types button {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 22px;
+  text-align: left;
+  border: 1px solid #00000026;
+}
+.event-types button span {
+  margin-left: auto;
+}
+.event-intro h2 {
+  font-size: 38px;
+}
+.eyebrow {
+  color: #000000;
+}
+@media (max-width: 600px) {
+  .event-types {
+    grid-template-columns: 1fr;
+  }
+  .event-intro h2 {
+    font-size: 30px;
+  }
+}
+
+.header-logo {
+  width: 220px;
+  background: #000000;
+  padding: 8px;
+  max-width: 45vw;
+  height: auto;
+}

@@ -1,0 +1,227 @@
+{
+  "name": "H20 A — Official website scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Set the Data Table ID. Execute manually first. Review staged sources in the employee portal and publish the catalogue items you have checked. Re-scraping only updates source rows, never staff-reviewed catalogue entries. Add official detail-page URLs in Sources as needed. H20 Event Zaal and Rabo Esports Stadium describe the same large venue: publish only one to avoid duplicate capacity.",
+        "height": 220,
+        "width": 600
+      },
+      "id": "setup",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -280]
+    },
+    {
+      "parameters": {},
+      "id": "manual",
+      "name": "Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\"id\":\"h20-event-zaal\",\"label\":\"H20 Event Zaal\",\"kind\":\"room\",\"url\":\"https://eventlocatie.h20.gg/h20-event-zaal/\"},{\"id\":\"rabo-esports-stadium\",\"label\":\"Rabo Esports Stadium\",\"kind\":\"room\",\"url\":\"https://eventlocatie.h20.gg/rabo-esports-stadium-eventlocatie/\"},{\"id\":\"h20-lounge-cafe\",\"label\":\"H20 Lounge Café\",\"kind\":\"room\",\"url\":\"https://eventlocatie.h20.gg/lounge-cafe/\"},{\"id\":\"aula\",\"label\":\"Aula\",\"kind\":\"room\",\"url\":\"https://eventlocatie.h20.gg/aula/\"},{\"id\":\"catering\",\"label\":\"Catering\",\"kind\":\"catering\",\"url\":\"https://eventlocatie.h20.gg/catering-eventlocatie/\"},{\"id\":\"activities\",\"label\":\"Activiteiten\",\"kind\":\"activity\",\"url\":\"https://h20.gg/activiteiten-bij-h20/\"},{\"id\":\"rooms-overview\",\"label\":\"Ruimtes\",\"kind\":\"information\",\"url\":\"https://eventlocatie.h20.gg/ruimtes-eventlocatie/\"},{\"id\":\"contact\",\"label\":\"Contact\",\"kind\":\"information\",\"url\":\"https://eventlocatie.h20.gg/contact/\"}].map(json=>({json}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "sources",
+      "name": "Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "fetch-official-page",
+      "name": "Fetch official page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "sourceData": "json",
+        "dataPropertyName": "data",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "heading",
+              "cssSelector": "h1",
+              "returnValue": "text"
+            },
+            {
+              "key": "title",
+              "cssSelector": "title",
+              "returnValue": "text"
+            },
+            {
+              "key": "content",
+              "cssSelector": "main, article, .elementor-location-single",
+              "returnValue": "text",
+              "skipSelectors": "script, style, nav, footer"
+            },
+            {
+              "key": "image",
+              "cssSelector": "meta[property=\"og:image\"]",
+              "returnValue": "attribute",
+              "attribute": "content"
+            }
+          ]
+        },
+        "options": {
+          "trimValues": true,
+          "cleanUpText": true
+        }
+      },
+      "id": "extract-html",
+      "name": "Extract HTML",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input is HTML-node extraction, never executable page content.\nfunction clean(value) {\n  return String(value ?? '')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\nfunction normalizeSource(source, extracted) {\n  const content = clean(extracted.content);\n  if (content.length < 50)\n    throw new Error(`Geen bruikbare inhoud voor ${source.url}; controleer de HTML-selectors.`);\n  const title =\n    clean(extracted.heading) || clean(extracted.title).replace(/\\s*[-–|]\\s*H20.*$/i, '');\n  let imageUrl = '';\n  try {\n    const candidate = new URL(extracted.image, source.url);\n    if (\n      candidate.protocol === 'https:' &&\n      (candidate.hostname === 'h20.gg' || candidate.hostname.endsWith('.h20.gg'))\n    )\n      imageUrl = candidate.href;\n  } catch {\n    /* An absent or external image needs review. */\n  }\n  const capacity = content.match(\n    /(?:van\\s+)?(\\d{1,4})\\s*(?:tot|–|-)\\s*(\\d[\\d.]*)\\s*(?:personen|gasten)/i,\n  );\n  const maximum = capacity ? Number(capacity[2].replaceAll('.', '')) : undefined;\n  const description = content.slice(0, 6000);\n  const common = {\n    id: source.id,\n    name: title || source.label,\n    description,\n    isActive: false,\n    sourceUrl: source.url,\n    sourceRetrievedAt: new Date().toISOString(),\n  };\n  let suggestedItem;\n  if (source.kind === 'room')\n    suggestedItem = {\n      ...common,\n      dutchName: common.name,\n      category: 'Meeting & Conference',\n      capacityDisplay: capacity\n        ? `${capacity[1]} – ${maximum} personen (bron controleren)`\n        : 'Capaciteit op aanvraag',\n      minCapacity: capacity ? Number(capacity[1]) : 1,\n      ...(maximum ? { maxCapacity: maximum } : {}),\n      capacityVerified: false,\n      facilities: [],\n      suitableFor: [],\n      imageUrl,\n      unconfirmedNote:\n        'Controleer de bron, capaciteit en faciliteiten voordat je deze zaal publiceert.',\n    };\n  else if (source.kind === 'catering')\n    suggestedItem = {\n      ...common,\n      category: 'Dinner catering',\n      categoryDutch: 'Catering op maat',\n      pricePerPerson: null,\n      priceDisplay: 'Prijs op aanvraag',\n      status: 'Subject to Confirmation',\n      isOfficialH20: true,\n    };\n  else if (source.kind === 'activity')\n    suggestedItem = {\n      ...common,\n      tag: 'H20 activiteiten',\n      price: null,\n      priceDisplay: 'Prijs op aanvraag',\n    };\n  return {\n    recordId: `source:${source.id}`,\n    kind: 'source',\n    payload: JSON.stringify({\n      data: {\n        id: source.id,\n        url: source.url,\n        title,\n        content,\n        imageUrl,\n        retrievedAt: new Date().toISOString(),\n        catalogueKind: source.kind,\n        suggestedItem,\n      },\n    }),\n  };\n}\n\nreturn $input.all().map((item,index)=>({json:normalizeSource($('Sources').all()[index].json,item.json)}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "normalize-sources",
+      "name": "Normalize sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_H20_DATA_TABLE_ID",
+          "mode": "id"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "recordId",
+              "condition": "eq",
+              "keyValue": "={{ $json.recordId }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "recordId": "={{ $json.recordId }}",
+            "kind": "={{ $json.kind }}",
+            "payload": "={{ $json.payload }}"
+          },
+          "schema": [
+            {
+              "id": "recordId",
+              "displayName": "recordId",
+              "type": "string"
+            },
+            {
+              "id": "kind",
+              "displayName": "kind",
+              "type": "string"
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "stage-source",
+      "name": "Stage source",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1100, 0]
+    }
+  ],
+  "connections": {
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sources": {
+      "main": [
+        [
+          {
+            "node": "Fetch official page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch official page": {
+      "main": [
+        [
+          {
+            "node": "Extract HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract HTML": {
+      "main": [
+        [
+          {
+            "node": "Normalize sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize sources": {
+      "main": [
+        [
+          {
+            "node": "Stage source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "timezone": "Europe/Amsterdam"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}
