@@ -33,6 +33,12 @@ export class EventBuilder implements OnInit {
   readonly selectedStep = computed(() => this.steps[this.step() - 1]);
   ngOnInit(): void {
     if (this.initial()) this.config = JSON.parse(JSON.stringify(this.initial()));
+    this.baseline = JSON.stringify(this.config);
+  }
+  private baseline = '';
+  /** True when the config differs from what the builder was opened with. */
+  dirty(): boolean {
+    return JSON.stringify(this.config) !== this.baseline;
   }
   get price() {
     return estimate(

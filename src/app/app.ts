@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -96,6 +97,10 @@ export class App {
   roomQuery = '';
   minCapacity = 0;
   receipt = '';
+  builderKey = 0;
+  replacePlan: { config: EventConfiguration | null } | null = null;
+  private bookingProposalId: string | null = null;
+  private readonly builderRef = viewChild(EventBuilder);
   private builderRequested = false;
   private receiptReady = false;
   private openedReceipt = '';
@@ -109,6 +114,7 @@ export class App {
       } else {
         this.builder.set(false);
         this.bookingConfig = null;
+        this.replacePlan = null;
         this.builderRequested = false;
         this.resetBuilderState();
       }
@@ -177,6 +183,31 @@ export class App {
     this.chat = false;
     void this.router.navigateByUrl('/' + PAGE_PATHS['event-builder']);
   }
+  /** Assistant plan: replaces an open builder (after confirming unsaved edits) or opens one. */
+  applyPlan(config: EventConfiguration | null): void {
+    const builder = this.builderRef();
+    if (!this.builder() || !builder) return this.openBuilder(config);
+    this.chat = false;
+    if (builder.dirty()) this.replacePlan = { config };
+    else this.replaceBuilder(config);
+    this.cdr.markForCheck();
+  }
+  confirmReplace(accepted: boolean): void {
+    const pending = this.replacePlan;
+    this.replacePlan = null;
+    if (accepted && pending) this.replaceBuilder(pending.config);
+    this.cdr.markForCheck();
+  }
+  private replaceBuilder(config: EventConfiguration | null): void {
+    this.editingProposalId = null;
+    this.builderConfig = config;
+    this.builderKey++;
+  }
+  dismissBooking(): void {
+    const config = this.bookingConfig;
+    this.bookingConfig = null;
+    this.openBuilder(config, this.bookingProposalId);
+  }
   private resetBuilderState(): void {
     this.editingProposalId = null;
     this.builderConfig = null;
@@ -201,6 +232,7 @@ export class App {
   }
   startBooking(config: EventConfiguration): void {
     this.builder.set(false);
+    this.bookingProposalId = this.editingProposalId;
     this.bookingConfig = config;
   }
   created(booking: Booking): void {

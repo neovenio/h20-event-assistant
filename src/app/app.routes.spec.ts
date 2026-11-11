@@ -88,6 +88,108 @@ describe('routing', () => {
     expect(state.initial).toBeNull();
   });
 
+  describe('builder edit target and assistant plans', () => {
+    const proposals = (fixture: ReturnType<typeof TestBed.createComponent<App>>) =>
+      fixture.componentInstance.store.proposals();
+    const builderOf = (fixture: ReturnType<typeof TestBed.createComponent<App>>) =>
+      fixture.debugElement.query(By.directive(EventBuilder)).componentInstance as EventBuilder;
+    const valid = () => ({ ...emptyConfiguration(), name: 'Teamdag', date: '2999-01-01' });
+    const confirmText = (fixture: ReturnType<typeof TestBed.createComponent<App>>) =>
+      fixture.nativeElement.querySelector('.confirm-replace')?.textContent ?? '';
+
+    async function editX() {
+      const fixture = await open('/my-proposals');
+      const app = fixture.componentInstance;
+      const x = app.store.saveProposal({ ...valid(), name: 'X' });
+      app.openBuilder({ ...x.config }, x.id);
+      await fixture.whenStable();
+      return { fixture, app, x };
+    }
+
+    it('keeps the edit target when the booking form is dismissed', async () => {
+      const { fixture, app, x } = await editX();
+      const before = proposals(fixture).length;
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      expect(builderOf(fixture).proposalId()).toBe(x.id);
+      builderOf(fixture).config.name = 'X2';
+      builderOf(fixture).save();
+      expect(proposals(fixture).length).toBe(before);
+      expect(proposals(fixture).find((p) => p.id === x.id)?.config.name).toBe('X2');
+    });
+
+    it('stays a new concept when a new concept is booked and dismissed', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      const before = proposals(fixture).length;
+      app.startBooking(valid());
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      expect(builderOf(fixture).proposalId()).toBeNull();
+      builderOf(fixture).save();
+      expect(proposals(fixture).length).toBe(before + 1);
+    });
+
+    it('replaces an unchanged builder config with an assistant plan and resets to step 1', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      builderOf(fixture).step.set(3);
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      expect(builderOf(fixture).config.participants).toBe(77);
+      expect(builderOf(fixture).step()).toBe(1);
+      expect(confirmText(fixture)).toBe('');
+    });
+
+    it('asks for confirmation before replacing edited work, and confirming replaces it', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      builderOf(fixture).config.name = 'Mijn werk';
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      expect(confirmText(fixture)).toContain('Je huidige plan vervangen?');
+      expect(builderOf(fixture).config.name).toBe('Mijn werk');
+      app.confirmReplace(true);
+      await fixture.whenStable();
+      expect(builderOf(fixture).config.participants).toBe(77);
+      expect(builderOf(fixture).config.name).toBe('');
+      expect(confirmText(fixture)).toBe('');
+    });
+
+    it('keeps config and edit target when the replacement is cancelled', async () => {
+      const { fixture, app, x } = await editX();
+      builderOf(fixture).config.name = 'Mijn werk';
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      app.confirmReplace(false);
+      await fixture.whenStable();
+      expect(builderOf(fixture).config.name).toBe('Mijn werk');
+      expect(builderOf(fixture).proposalId()).toBe(x.id);
+      expect(confirmText(fixture)).toBe('');
+    });
+
+    it('saves an applied assistant plan as a new concept and leaves X unchanged', async () => {
+      const { fixture, app, x } = await editX();
+      const before = proposals(fixture).length;
+      app.applyPlan({ ...valid(), name: 'AI plan' });
+      await fixture.whenStable();
+      expect(builderOf(fixture).proposalId()).toBeNull();
+      builderOf(fixture).save();
+      expect(proposals(fixture).length).toBe(before + 1);
+      expect(proposals(fixture).find((p) => p.id === x.id)?.config.name).toBe('X');
+    });
+
+    it('opens the builder with the plan when it is not open yet', async () => {
+      const fixture = await open('/');
+      fixture.componentInstance.applyPlan({ ...emptyConfiguration(), participants: 55 });
+      await fixture.whenStable();
+      expect(builderOf(fixture).config.participants).toBe(55);
+    });
+  });
+
   it('only shows the demo staff portal while no n8n backend is configured', async () => {
     const fixture = await open('/');
     const app = fixture.componentInstance;
