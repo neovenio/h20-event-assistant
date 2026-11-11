@@ -45,12 +45,24 @@ The proposal generator does not trust submitted room prices, add-on prices or a 
 
 ## Prototype limitations
 
-- A Data Table upsert does not provide a multi-record transaction or a booking-lock mechanism. The conflict check and write are separate operations. Simultaneous requests can race; staff must check the schedule before making any real commitment. This is a concept-planning prototype, not a transactional reservation/payment system.
+- Slot claims are race-safe, but only as strong as the claim protocol below: the Data Table has no transaction or lock, so double-booking is prevented by reserve-first, verify-after ordering instead. Staff approval still re-checks conflicts as a safety net. This remains a concept-planning prototype, not a payment system.
 - Configure public webhook rate limits at your ingress before broad public use. CORS alone does not stop direct requests or Gemini spending.
 - Workflow exports disable saving successful/failed production execution data and manual executions by default to reduce stored contact data. Review workspace execution retention and user access as well.
 - A personal receipt URL grants access to that request. It uses a high-entropy random token in the URL fragment. Treat it as private. There is no full customer account system.
 - Email is at-least-once delivery. Verify SMTP and recipient handling with test records before activating the schedule.
 - Live import/runtime testing requires the real Data Table ID and n8n credentials. The local tests cannot verify those external resources.
+
+## Slot claims (race protocol)
+
+Customer requests (workflow B `event-request`) and staff blocks (workflow C `add-block`) are both _slot claims_. A `pending_review` request is a soft hold: overlapping active claims (not rejected, cancelled, refunded or draft) never coexist.
+
+1. After validation, and before Gemini, the claim row is **inserted** with `claimStatus: 'claiming'` (the Data Table assigns the auto-increment row `id`).
+2. All rows are **re-read**. Among the active claims that overlap ours (same date, overlapping time, any shared room including `additionalRooms`), the **lowest row `id` wins**.
+3. A loser deletes its own row (by `id`) and answers 409 with the usual overlap message. A winner continues: bookings call Gemini and save `claimStatus: 'held'` with `aiStatus: 'ok'`; blocks are set to `held` straight away.
+4. If Gemini fails, the hold is kept: the booking is saved `held` with `aiStatus: 'failed'` and no explanation, the customer gets a normal receipt, and staff see "AI-uitleg ontbreekt" and add the text through the `review` action. Staff cannot approve a booking without explanation.
+5. A retry with the same `requestId` that finds a `claiming` row re-runs the verification; a `held` row returns the receipt as before. Claims still `claiming` after 10 minutes show up in the staff list as "Onvolledige aanvraag" and can be rejected. There is no cleanup workflow. Rows without these fields count as `held`/`ok`.
+
+Rationale and rejected alternatives: `docs/adr/0001-slot-claims.md`. Workflows B and C must be re-imported after this change.
 
 ## Editing and tests
 

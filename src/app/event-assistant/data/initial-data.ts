@@ -37,6 +37,9 @@ export interface InternalNote {
 
 export interface Booking {
   requestStatus?: 'pending_review' | 'approved' | 'rejected';
+  /** Staff payloads only. Missing on older rows: treated as 'held' / 'ok'. */
+  claimStatus?: 'claiming' | 'held';
+  aiStatus?: 'ok' | 'failed';
   explanation?: string;
   planning?: {
     startTime: string;

@@ -101,6 +101,56 @@ function upsert(name, x, y = 0) {
     y,
   );
 }
+const recordColumns = (prefix) => ({
+  mappingMode: 'defineBelow',
+  value: {
+    recordId: `={{ ${prefix}.recordId }}`,
+    kind: `={{ ${prefix}.kind }}`,
+    payload: `={{ ${prefix}.payload }}`,
+  },
+  schema: [
+    { id: 'recordId', displayName: 'recordId', type: 'string' },
+    { id: 'kind', displayName: 'kind', type: 'string' },
+    { id: 'payload', displayName: 'payload', type: 'string' },
+  ],
+});
+/** Inserts a NEW row (never dedupes on recordId) so the Data Table assigns the claim its ordering id. */
+function insertClaim(name, x, y = 0) {
+  return node(
+    name,
+    'dataTable',
+    {
+      resource: 'row',
+      operation: 'insert',
+      dataTableId: table,
+      columns: recordColumns('$json.write'),
+      options: {},
+    },
+    x,
+    y,
+    { onError: 'continueRegularOutput' },
+  );
+}
+/** Deletes by the system `id` column: recordIds can repeat across inserted rows. */
+function deleteClaim(name, x, y = 0) {
+  return node(
+    name,
+    'dataTable',
+    {
+      resource: 'row',
+      operation: 'deleteRows',
+      dataTableId: table,
+      matchType: 'allConditions',
+      filters: {
+        conditions: [{ keyName: 'id', condition: 'eq', keyValue: '={{ $json.releaseId }}' }],
+      },
+      options: {},
+    },
+    x,
+    y,
+    { onError: 'continueRegularOutput' },
+  );
+}
 function write(file, name, nodes, connections) {
   fs.writeFileSync(
     path.join(root, 'workflows', file),
@@ -149,8 +199,30 @@ function apiWorkflow(admin) {
   );
   const routing = `${domain}\ntry { const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const body=$('Webhook').first().json.body??{};if(JSON.stringify(body).length>25000)fail('Verzoek is te groot.',413);return [{json:${admin ? 'adminAction' : 'publicAction'}(body,parseRows(items))}]; }catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   nodes.push(code('Route request', routing, 440));
+  // Slot claims: insert the claim, re-read, resolve. Winners continue; losers are deleted by 'Release claim'.
+  const resolve = `${domain}\ntry{const context=$('Route request').first().json;const inserted=$('Claim insert').first().json;if(inserted.error||inserted.id==null)fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))fail('De database is niet beschikbaar.',503);return [{json:settleClaim(context,inserted.id,parseRows(items))}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
+  nodes.push(check('Needs claim', 'claim', 660));
+  nodes.push(insertClaim('Claim insert', 880, 300));
+  nodes.push(
+    node(
+      'Read after claim',
+      'dataTable',
+      { resource: 'row', operation: 'get', dataTableId: table, returnAll: true },
+      1100,
+      300,
+      { alwaysOutputData: true, onError: 'continueRegularOutput' },
+    ),
+  );
+  nodes.push(code('Resolve claim', resolve, 1320, 300));
+  nodes.push(code('Request context', 'return $input.all();', 1540));
+  connect(connections, 'Route request', 'Needs claim');
+  connect(connections, 'Needs claim', 'Claim insert');
+  connect(connections, 'Needs claim', 'Request context', 1);
+  connect(connections, 'Claim insert', 'Read after claim');
+  connect(connections, 'Read after claim', 'Resolve claim');
+  connect(connections, 'Resolve claim', 'Request context');
   if (!admin) {
-    nodes.push(check('Needs Gemini', 'gemini', 660));
+    nodes.push(check('Needs Gemini', 'gemini', 1760));
     nodes.push(
       node(
         'Gemini',
@@ -165,7 +237,7 @@ function apiWorkflow(admin) {
           jsonBody: '={{ $json.geminiBody }}',
           options: { timeout: 45000 },
         },
-        880,
+        1980,
         -140,
         { onError: 'continueRegularOutput' },
       ),
@@ -173,22 +245,22 @@ function apiWorkflow(admin) {
     nodes.push(
       code(
         'Validate AI output',
-        `${domain}\ntry{return [{json:finishGemini($('Route request').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??502,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
-        1100,
+        `${domain}\ntry{return [{json:finishGemini($('Request context').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??502,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
+        2200,
         -140,
       ),
     );
-    nodes.push(code('Result', 'return $input.all();', 1320));
-    connect(connections, 'Route request', 'Needs Gemini');
+    nodes.push(code('Result', 'return $input.all();', 2420));
+    connect(connections, 'Request context', 'Needs Gemini');
     connect(connections, 'Needs Gemini', 'Gemini');
     connect(connections, 'Needs Gemini', 'Result', 1);
     connect(connections, 'Gemini', 'Validate AI output');
     connect(connections, 'Validate AI output', 'Result');
   } else {
-    nodes.push(code('Result', 'return $input.all();', 660));
-    connect(connections, 'Route request', 'Result');
+    nodes.push(code('Result', 'return $input.all();', 1760));
+    connect(connections, 'Request context', 'Result');
   }
-  const offset = admin ? 880 : 1540;
+  const offset = admin ? 1980 : 2640;
   nodes.push(check('Needs save', 'save', offset));
   nodes.push(
     code('Write payload', 'return [{json:$("Result").first().json.write}];', offset + 220, -100),
@@ -201,6 +273,16 @@ function apiWorkflow(admin) {
       `const result=$('Result').first().json;const saved=$input.all();if(saved.some(item=>item.json.error))return [{json:{status:503,response:{error:'Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.'}}}];return [{json:{status:result.status,response:result.response}}];`,
       offset + 660,
       -100,
+    ),
+  );
+  nodes.push(check('Needs release', 'release', offset + 220, 150));
+  nodes.push(deleteClaim('Release claim', offset + 440, 150));
+  nodes.push(
+    code(
+      'After release',
+      `const result=$('Result').first().json;return [{json:{status:result.status,response:result.response}}];`,
+      offset + 660,
+      150,
     ),
   );
   nodes.push(
@@ -227,7 +309,11 @@ function apiWorkflow(admin) {
   connect(connections, 'Read records', 'Route request');
   connect(connections, 'Result', 'Needs save');
   connect(connections, 'Needs save', 'Write payload');
-  connect(connections, 'Needs save', 'Respond', 1);
+  connect(connections, 'Needs save', 'Needs release', 1);
+  connect(connections, 'Needs release', 'Release claim');
+  connect(connections, 'Needs release', 'Respond', 1);
+  connect(connections, 'Release claim', 'After release');
+  connect(connections, 'After release', 'Respond');
   connect(connections, 'Write payload', 'Save record');
   connect(connections, 'Save record', 'After save');
   connect(connections, 'After save', 'Respond');

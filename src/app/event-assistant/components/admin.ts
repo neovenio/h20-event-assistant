@@ -106,6 +106,18 @@ export class Admin {
     'Cancelled',
     'Refunded',
   ];
+  /** Claim inserted but never completed (crashed request): shown to staff after this long. */
+  static readonly STALE_CLAIM_MS = 10 * 60 * 1000;
+  aiMissing(b: Booking): boolean {
+    return b.aiStatus === 'failed';
+  }
+  incomplete(b: Booking): boolean {
+    return (
+      b.claimStatus === 'claiming' &&
+      b.requestStatus !== 'rejected' &&
+      Date.now() - Date.parse(b.reservation.createdAt) > Admin.STALE_CLAIM_MS
+    );
+  }
   publish(source: ScrapedSource): void {
     void this.run(() => this.store.publishSource(source));
   }
