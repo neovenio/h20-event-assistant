@@ -23,7 +23,7 @@
 @if (success) {
   <p class="success" role="status">{{ success }}</p>
 }
-@switch (section()) {
+@switch (activeSection()) {
   @case ('bookings') {
     <div class="stats">
       <div class="panel">

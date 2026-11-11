@@ -36,7 +36,7 @@ export function pageForPath(path: string | undefined): Page {
   );
 }
 
-// The shell (App) renders every page itself, so routes carry no components.
+// The shell (App) renders public pages itself; /admin lazy-loads the staff portal.
 export const routes: Routes = [
   { path: '', pathMatch: 'full', children: [] },
   ...(
@@ -45,6 +45,7 @@ export const routes: Routes = [
   {
     path: PAGE_PATHS.admin,
     canActivate: [staffGuard],
+    loadComponent: () => import('./event-assistant/components/admin').then((m) => m.Admin),
     children: [
       { path: '', pathMatch: 'full', redirectTo: ADMIN_SECTIONS[0] },
       ...ADMIN_SECTIONS.map((section) => ({ path: section, children: [] })),

@@ -400,12 +400,7 @@
         }
         @case ('admin') {
           @if (admin()) {
-            <app-admin
-              [section]="adminSection()"
-              (selectBooking)="selectedBooking = $event"
-              (newBooking)="openBuilder()"
-              (logout)="logout()"
-            />
+            <router-outlet (activate)="attachAdmin($event)" (deactivate)="detachAdmin()" />
           }
         }
       }
@@ -424,15 +419,18 @@
   ✦ <span>AI Assistent</span>
 </button>
 @if (builder()) {
-  @for (key of [builderKey]; track key) {
-    <app-event-builder
-      [initial]="builderConfig"
-      [initialBaseline]="builderBaseline"
-      [proposalId]="editingProposalId"
-      (dismissed)="closeBuilder()"
-      (book)="startBooking($event)"
-      (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
-    />
+  @defer (on immediate) {
+    @for (key of [builderKey]; track key) {
+      <app-event-builder
+        #builderRef
+        [initial]="builderConfig"
+        [initialBaseline]="builderBaseline"
+        [proposalId]="editingProposalId"
+        (dismissed)="closeBuilder()"
+        (book)="startBooking($event)"
+        (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
+      />
+    }
   }
 }
 @if (replacePlan) {
@@ -445,19 +443,19 @@
     </div>
   </app-modal>
 }
-@if (bookingConfig) {
-  <app-booking-form
-    [config]="bookingConfig"
-    (dismissed)="dismissBooking()"
-    (created)="created($event)"
-  />
+@if (bookingConfig; as config) {
+  @defer (on immediate) {
+    <app-booking-form
+      [config]="config"
+      (dismissed)="dismissBooking()"
+      (created)="created($event)"
+    />
+  }
 }
-@if (selectedBooking) {
-  <app-booking-detail
-    [value]="selectedBooking"
-    [admin]="admin()"
-    (dismissed)="selectedBooking = null"
-  />
+@if (selectedBooking; as booking) {
+  @defer (on immediate) {
+    <app-booking-detail [value]="booking" [admin]="admin()" (dismissed)="selectedBooking = null" />
+  }
 }
 @if (chat) {
   <app-modal heading="AI Planning Studio" (dismissed)="chat = false"
