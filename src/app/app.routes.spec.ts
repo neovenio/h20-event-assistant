@@ -3,7 +3,10 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
+import { By } from '@angular/platform-browser';
 import { App } from './app';
+import { EventBuilder } from './event-assistant/components/event-builder';
+import { emptyConfiguration } from './event-assistant/event-utils';
 import { routes } from './app.routes';
 import { AuthService } from './event-assistant/auth-service';
 import { Booking } from './event-assistant/models';
@@ -50,6 +53,48 @@ describe('routing', () => {
     await fixture.whenStable();
     expect(TestBed.inject(Router).url).toBe('/');
     expect(fixture.nativeElement.querySelector('app-event-builder')).toBeNull();
+  });
+
+  async function builderState(fixture: ReturnType<typeof TestBed.createComponent<App>>) {
+    await fixture.whenStable();
+    const builder = fixture.debugElement.query(By.directive(EventBuilder))?.componentInstance;
+    return { proposalId: builder?.proposalId(), initial: builder?.initial() };
+  }
+
+  it('opens a fresh builder from the nav after editing and closing a proposal', async () => {
+    const fixture = await open('/my-proposals');
+    const app = fixture.componentInstance;
+    app.openBuilder({ ...emptyConfiguration(), participants: 42 }, 'proposal-x');
+    await fixture.whenStable();
+    expect((await builderState(fixture)).proposalId).toBe('proposal-x');
+    app.closeBuilder();
+    await fixture.whenStable();
+    await TestBed.inject(Router).navigateByUrl('/plan');
+    const state = await builderState(fixture);
+    expect(state.proposalId).toBeNull();
+    expect(state.initial).toBeNull();
+  });
+
+  it('opens a fresh builder from the nav after saving an edited proposal', async () => {
+    const fixture = await open('/my-proposals');
+    const app = fixture.componentInstance;
+    app.openBuilder({ ...emptyConfiguration(), participants: 42 }, 'proposal-x');
+    await fixture.whenStable();
+    app.go('/my-proposals', 'Concept bewaard.');
+    await fixture.whenStable();
+    await TestBed.inject(Router).navigateByUrl('/plan');
+    const state = await builderState(fixture);
+    expect(state.proposalId).toBeNull();
+    expect(state.initial).toBeNull();
+  });
+
+  it('only shows the demo staff portal while no n8n backend is configured', async () => {
+    const fixture = await open('/');
+    const app = fixture.componentInstance;
+    TestBed.inject(AuthService).demoStaff.set(true);
+    expect(app.admin()).toBe(true);
+    app.store.api.configure('https://example.test/webhook/h20');
+    expect(app.admin()).toBe(false);
   });
 
   it('marks the current navigation item as active', async () => {

@@ -68,7 +68,9 @@ export class App {
   readonly page = computed(() => (this.tab() === 'event-builder' ? 'dashboard' : this.tab()));
   readonly mobile = signal(false);
   readonly collapsed = signal(false);
-  readonly admin = computed(() => this.auth.staff() || this.auth.demoStaff());
+  readonly admin = computed(
+    () => this.auth.staff() || (!this.store.live() && this.auth.demoStaff()),
+  );
   readonly path = PAGE_PATHS;
   readonly navigation = [
     { id: 'dashboard', label: 'Dashboard', icon: '▦' },
@@ -94,14 +96,21 @@ export class App {
   roomQuery = '';
   minCapacity = 0;
   receipt = '';
+  private builderRequested = false;
   private receiptReady = false;
   private openedReceipt = '';
   constructor() {
     effect(() => {
-      if (this.tab() === 'event-builder') this.builder.set(true);
-      else {
+      if (this.tab() === 'event-builder') {
+        // Entering /plan without openBuilder() (nav link, back/forward) starts a fresh concept.
+        if (!this.builderRequested) this.resetBuilderState();
+        this.builderRequested = false;
+        this.builder.set(true);
+      } else {
         this.builder.set(false);
         this.bookingConfig = null;
+        this.builderRequested = false;
+        this.resetBuilderState();
       }
     });
     effect(() => {
@@ -163,11 +172,17 @@ export class App {
   openBuilder(config: EventConfiguration | null = null, proposalId: string | null = null): void {
     this.editingProposalId = proposalId;
     this.builderConfig = config;
+    this.builderRequested = true;
     this.builder.set(true);
     this.chat = false;
     void this.router.navigateByUrl('/' + PAGE_PATHS['event-builder']);
   }
+  private resetBuilderState(): void {
+    this.editingProposalId = null;
+    this.builderConfig = null;
+  }
   closeBuilder(): void {
+    this.resetBuilderState();
     this.builder.set(false);
     if (this.tab() === 'event-builder') void this.router.navigateByUrl('/');
   }
