@@ -14,6 +14,8 @@ export class EventBuilder implements OnInit {
   readonly store = inject(EventStore);
   readonly initial = input<EventConfiguration | null>(null);
   readonly proposalId = input<string | null>(null);
+  /** Unsaved-changes baseline to restore (e.g. after the booking round trip); defaults to `initial`. */
+  readonly baseline = input<EventConfiguration | null>(null);
   readonly dismissed = output<void>();
   readonly book = output<EventConfiguration>();
   readonly saved = output<void>();
@@ -31,18 +33,23 @@ export class EventBuilder implements OnInit {
   config = emptyConfiguration();
   error = '';
   readonly selectedStep = computed(() => this.steps[this.step() - 1]);
-  private baseline = JSON.stringify(this.config);
+  private baselineJson = JSON.stringify(this.config);
   ngOnInit(): void {
     if (this.initial()) this.replaceConfig(this.initial()!);
+    if (this.baseline()) this.baselineJson = JSON.stringify(this.baseline());
+  }
+  /** The config the builder was opened or last reset with. */
+  baselineConfig(): EventConfiguration {
+    return JSON.parse(this.baselineJson);
   }
   /** True when the current config differs from the one last applied via `initial`/replaceConfig. */
   hasUnsavedChanges(): boolean {
-    return JSON.stringify(this.config) !== this.baseline;
+    return JSON.stringify(this.config) !== this.baselineJson;
   }
   /** Replaces the working config (e.g. with an assistant plan) and returns to step 1. */
   replaceConfig(config: EventConfiguration): void {
     this.config = JSON.parse(JSON.stringify(config));
-    this.baseline = JSON.stringify(this.config);
+    this.baselineJson = JSON.stringify(this.config);
     this.error = '';
     this.step.set(1);
   }

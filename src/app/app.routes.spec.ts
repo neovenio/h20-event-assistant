@@ -153,11 +153,36 @@ describe('routing', () => {
       expect(app.pendingPlan).toBeNull();
       expect(builderOf(fixture).config.participants).toBe(55);
       expect(builderOf(fixture).proposalId()).toBe(saved.id);
+      builderOf(fixture).step.set(3);
       app.assistantPlan(plan());
       app.confirmPlan();
       await fixture.whenStable();
       expect(builderOf(fixture).config.participants).toBe(77);
       expect(builderOf(fixture).step()).toBe(1);
+      expect(builderOf(fixture).proposalId()).toBeNull();
+    });
+
+    it('still asks for confirmation after edit, book and dismiss', async () => {
+      const { fixture, app } = await openEditing();
+      builderOf(fixture).config.participants = 55;
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      app.assistantPlan(plan());
+      await fixture.whenStable();
+      expect(app.pendingPlan).not.toBeNull();
+      expect(builderOf(fixture).config.participants).toBe(55);
+    });
+
+    it('clears a pending plan when leaving /plan', async () => {
+      const { fixture, app } = await openEditing();
+      builderOf(fixture).config.participants = 55;
+      app.assistantPlan(plan());
+      expect(app.pendingPlan).not.toBeNull();
+      await TestBed.inject(Router).navigateByUrl('/my-proposals');
+      await fixture.whenStable();
+      expect(app.pendingPlan).toBeNull();
     });
 
     it('saves an applied assistant plan as a new concept and leaves X unchanged', async () => {

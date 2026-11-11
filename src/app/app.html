@@ -426,6 +426,7 @@
 @if (builder()) {
   <app-event-builder
     [initial]="builderConfig"
+    [baseline]="builderBaseline"
     [proposalId]="editingProposalId"
     (dismissed)="closeBuilder()"
     (book)="startBooking($event)"

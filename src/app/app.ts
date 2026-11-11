@@ -88,6 +88,8 @@ export class App {
   bookingConfig: EventConfiguration | null = null;
   pendingPlan: EventConfiguration | null = null;
   private bookingProposalId: string | null = null;
+  private bookingBaseline: EventConfiguration | null = null;
+  builderBaseline: EventConfiguration | null = null;
   private readonly builderRef = viewChild(EventBuilder);
   selectedRoom: Room | null = null;
   selectedBooking: Booking | null = null;
@@ -113,6 +115,7 @@ export class App {
       } else {
         this.builder.set(false);
         this.bookingConfig = null;
+        this.pendingPlan = null;
         this.builderRequested = false;
         this.resetBuilderState();
       }
@@ -176,6 +179,7 @@ export class App {
   openBuilder(config: EventConfiguration | null = null, proposalId: string | null = null): void {
     this.editingProposalId = proposalId;
     this.builderConfig = config;
+    this.builderBaseline = null;
     this.builderRequested = true;
     this.builder.set(true);
     this.chat = false;
@@ -184,6 +188,7 @@ export class App {
   private resetBuilderState(): void {
     this.editingProposalId = null;
     this.builderConfig = null;
+    this.builderBaseline = null;
   }
   closeBuilder(): void {
     this.resetBuilderState();
@@ -205,6 +210,7 @@ export class App {
   }
   startBooking(config: EventConfiguration): void {
     this.bookingProposalId = this.editingProposalId;
+    this.bookingBaseline = this.builderRef()?.baselineConfig() ?? null;
     this.builder.set(false);
     this.bookingConfig = config;
   }
@@ -213,6 +219,7 @@ export class App {
     const config = this.bookingConfig;
     this.bookingConfig = null;
     this.openBuilder(config, this.bookingProposalId);
+    this.builderBaseline = this.bookingBaseline;
   }
   /** An assistant plan always becomes a new concept; it never targets a saved one. */
   assistantPlan(plan: EventConfiguration | null): void {
