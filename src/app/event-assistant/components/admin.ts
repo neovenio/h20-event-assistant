@@ -1,4 +1,5 @@
-import { Component, computed, inject, output, signal } from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { EventStore } from '../event-store';
@@ -15,7 +16,7 @@ import { Modal } from './modal';
 import { Assistant } from './assistant';
 @Component({
   selector: 'app-admin',
-  imports: [FormsModule, CurrencyPipe, DatePipe, Modal, Assistant],
+  imports: [FormsModule, CurrencyPipe, DatePipe, Modal, Assistant, RouterLink, RouterLinkActive],
   templateUrl: './admin.html',
 })
 export class Admin {
@@ -23,7 +24,8 @@ export class Admin {
   readonly selectBooking = output<Booking>();
   readonly newBooking = output<void>();
   readonly logout = output<void>();
-  readonly tab = signal('bookings');
+  /** Active sub-tab, taken from the /admin/:section route by the shell. */
+  readonly section = input('bookings');
   readonly query = signal('');
   readonly status = signal('');
   readonly roomFilter = signal('');

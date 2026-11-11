@@ -1,7 +1,13 @@
 {
   "hosting": {
     "public": "dist/h20-event-assistant/browser",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.csr.html"
+      }
+    ]
   },
   "auth": {
     "providers": {
