@@ -427,6 +427,7 @@
   @for (key of [builderKey]; track key) {
     <app-event-builder
       [initial]="builderConfig"
+      [initialBaseline]="builderBaseline"
       [proposalId]="editingProposalId"
       (dismissed)="closeBuilder()"
       (book)="startBooking($event)"

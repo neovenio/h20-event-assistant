@@ -182,6 +182,47 @@ describe('routing', () => {
       expect(proposals(fixture).find((p) => p.id === x.id)?.config.name).toBe('X');
     });
 
+    it('still confirms after book and dismiss when the work was edited before booking', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      builderOf(fixture).config.name = 'Mijn werk';
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      expect(confirmText(fixture)).toContain('Je huidige plan vervangen?');
+      expect(builderOf(fixture).config.name).toBe('Mijn werk');
+    });
+
+    it('still confirms after book and dismiss while editing X', async () => {
+      const { fixture, app, x } = await editX();
+      builderOf(fixture).config.name = 'Mijn werk';
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      expect(confirmText(fixture)).toContain('Je huidige plan vervangen?');
+      app.confirmReplace(false);
+      await fixture.whenStable();
+      expect(builderOf(fixture).proposalId()).toBe(x.id);
+    });
+
+    it('drops the booking state when a plan is applied while the booking form is open', async () => {
+      const { fixture, app, x } = await editX();
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.applyPlan({ ...emptyConfiguration(), participants: 77 });
+      await fixture.whenStable();
+      expect(app.bookingConfig).toBeNull();
+      expect(builderOf(fixture).config.participants).toBe(77);
+      expect(builderOf(fixture).proposalId()).toBeNull();
+      expect(x.id).toBeTruthy();
+    });
+
     it('opens the builder with the plan when it is not open yet', async () => {
       const fixture = await open('/');
       fixture.componentInstance.applyPlan({ ...emptyConfiguration(), participants: 55 });
