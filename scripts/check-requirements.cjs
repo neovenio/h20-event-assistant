@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const css = fs.readFileSync('src/app/event-assistant/brand.css', 'utf8');
 const html = fs.readFileSync('src/app/app.html', 'utf8');
 const runtime = JSON.parse(fs.readFileSync('public/h20-runtime.json', 'utf8'));
+const demoData = fs.readFileSync('src/app/event-assistant/data/initial-data.ts', 'utf8');
+const demoImageUrls = [...demoData.matchAll(/imageUrl:\s*'([^']+)'/g)].map((m) => m[1]);
 const checks = [
   [
     'Merkpalet aanwezig',
@@ -13,6 +15,15 @@ const checks = [
   ['Inklapbare navigatie', html.includes('aria-expanded') && html.includes('nav-collapsed')],
   ['Officiële website gelinkt', html.includes('https://eventlocatie.h20.gg/')],
   ['Lijniconen aanwezig', html.includes('app-icon')],
+  [
+    'Demo-afbeeldingen bestaan in public/',
+    demoImageUrls.length > 0 &&
+      demoImageUrls.every((url) => {
+        const exists = fs.existsSync(`public${url}`);
+        if (!exists) console.log(`Ontbrekend bestand: public${url}`);
+        return exists;
+      }),
+  ],
   ['n8n URL ingesteld', !!runtime.n8nWebhookBaseUrl],
 ];
 for (const [label, ok] of checks) console.log(`${ok ? 'PASS' : 'ONTBREEKT'}: ${label}`);
