@@ -47,6 +47,12 @@ export interface Booking {
     responsible: string;
   }[];
   reviewNotes?: string;
+  /** Slot claim lifecycle; absent on legacy rows, which count as 'held'. Staff API only. */
+  claimStatus?: 'claiming' | 'held';
+  /** Data Table creation time of a 'claiming' row (staff API only). */
+  claimCreatedAt?: string;
+  /** 'failed' when Gemini produced no usable text; absent on legacy rows, which count as 'ok'. */
+  aiStatus?: 'ok' | 'failed';
   id: string;
   reference: string;
   customer: {
