@@ -417,7 +417,9 @@ const scrapeNodes = [
           { key: 'title', cssSelector: 'title', returnValue: 'text' },
           {
             key: 'content',
-            cssSelector: 'main, article, .elementor-location-single',
+            // eventlocatie.h20.gg has no main/article; its body is the Elementor wp-page block.
+            cssSelector:
+              'main, article, .elementor-location-single, [data-elementor-type="wp-page"]',
             returnValue: 'text',
             skipSelectors: 'script, style, nav, footer',
           },
