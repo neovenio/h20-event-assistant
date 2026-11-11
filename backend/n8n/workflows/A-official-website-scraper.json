@@ -70,7 +70,7 @@
             },
             {
               "key": "content",
-              "cssSelector": "main, article, .elementor-location-single",
+              "cssSelector": "main, article, .elementor-location-single, [data-elementor-type=\"wp-page\"]",
               "returnValue": "text",
               "skipSelectors": "script, style, nav, footer"
             },
