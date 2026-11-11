@@ -155,7 +155,7 @@ main {
   align-items: center;
   background:
     linear-gradient(90deg, #0b1121f5 0%, #0c1424df 44%, #0c14245a 100%),
-    url('/assets/aistudio/image_0751adcb.png') center/cover;
+    url('/assets/venue/image_0751adcb.png') center/cover;
 }
 .hero-content {
   max-width: 620px;

@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
 import { vi } from 'vitest';
 import { App } from './app';
+import { routes } from './app.routes';
 
 describe('App', () => {
   beforeEach(async () => {
@@ -8,7 +10,10 @@ describe('App', () => {
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, json: async () => ({ n8nWebhookBaseUrl: '' }) }),
     );
-    await TestBed.configureTestingModule({ imports: [App] }).compileComponents();
+    await TestBed.configureTestingModule({
+      imports: [App],
+      providers: [provideRouter(routes)],
+    }).compileComponents();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -22,10 +27,10 @@ describe('App', () => {
     );
     expect(fixture.nativeElement.textContent).toContain('Lokale demo');
   });
-  it('navigates to the venue catalogue without a router or hosting rewrite change', async () => {
+  it('navigates to the venue catalogue through the router', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    fixture.componentInstance.navigate('rooms');
+    await TestBed.inject(Router).navigateByUrl('/rooms');
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('h1')?.textContent).toContain(
       'Onze zalen & ruimtes',

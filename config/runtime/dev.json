@@ -1,0 +1,13 @@
+{
+  "n8nWebhookBaseUrl": "",
+  "firebase": {
+    "projectId": "h20-event-assistant-dev",
+    "appId": "1:904355552056:web:8452ae1d95c829f2e33fcd",
+    "storageBucket": "h20-event-assistant-dev.firebasestorage.app",
+    "apiKey": "AIzaSyCmbqX2809GvDT1jWUk5sxrCDqucnf5cu0",
+    "authDomain": "h20-event-assistant-dev.firebaseapp.com",
+    "messagingSenderId": "904355552056",
+    "projectNumber": "904355552056",
+    "version": "2"
+  }
+}
