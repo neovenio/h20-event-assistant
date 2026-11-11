@@ -450,6 +450,7 @@ write(
   scrapeConnections,
 );
 
+const FRONTEND_ORIGIN = 'https://h20-event-assistant-dev.web.app';
 const notifications = fs
   .readFileSync(path.join(root, 'code/notifications.cjs'), 'utf8')
   .split('if (typeof module')[0];
@@ -459,8 +460,8 @@ const mailNodes = [
     'stickyNote',
     {
       content:
-        'OPTIONAL — keep inactive until sender, SMTP credential, Data Table ID and frontend URL are configured. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.',
-      height: 200,
+        'OPTIONAL — keep inactive until sender, SMTP credential, Data Table ID and FRONTEND_ORIGIN are configured. FRONTEND_ORIGIN in Prepare mail defaults to https://h20-event-assistant-dev.web.app for dev; set FRONTEND_ORIGIN to https://h20-event-assistant-prod.web.app in the [PROD] workflow import. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.',
+      height: 220,
       width: 650,
     },
     0,
@@ -484,7 +485,7 @@ const mailNodes = [
   ),
   code(
     'Prepare mail',
-    `${notifications}\nreturn notificationJobs($input.all().map(item=>item.json), 'https://h20-event-assistant-dev.web.app').map(json=>({json}));`,
+    `const FRONTEND_ORIGIN = '${FRONTEND_ORIGIN}';\n${notifications}\nreturn notificationJobs($input.all().map(item=>item.json), FRONTEND_ORIGIN).map(json=>({json}));`,
     440,
   ),
   node(
