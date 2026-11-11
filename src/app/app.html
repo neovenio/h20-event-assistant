@@ -199,7 +199,7 @@
               </section>
             </div>
             <aside class="dashboard-aside">
-              <app-assistant (build)="openBuilder($event)" />
+              <app-assistant (build)="applyPlan($event)" />
               <section class="panel">
                 <span class="eyebrow">ALLES OP ÉÉN LOCATIE</span>
                 <h3>Meer dan een evenement</h3>
@@ -424,18 +424,31 @@
   ✦ <span>AI Assistent</span>
 </button>
 @if (builder()) {
-  <app-event-builder
-    [initial]="builderConfig"
-    [proposalId]="editingProposalId"
-    (dismissed)="closeBuilder()"
-    (book)="startBooking($event)"
-    (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
-  />
+  @for (key of [builderKey]; track key) {
+    <app-event-builder
+      [initial]="builderConfig"
+      [initialBaseline]="builderBaseline"
+      [proposalId]="editingProposalId"
+      (dismissed)="closeBuilder()"
+      (book)="startBooking($event)"
+      (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
+    />
+  }
+}
+@if (replacePlan) {
+  <app-modal heading="Plan vervangen" (dismissed)="confirmReplace(false)">
+    <div class="confirm-replace">
+      <p>Je huidige plan vervangen?</p>
+      <p>Je niet-bewaarde wijzigingen in de event builder gaan verloren.</p>
+      <button type="button" (click)="confirmReplace(false)">Annuleren</button>
+      <button type="button" class="primary" (click)="confirmReplace(true)">Vervangen</button>
+    </div>
+  </app-modal>
 }
 @if (bookingConfig) {
   <app-booking-form
     [config]="bookingConfig"
-    (dismissed)="openBuilder(bookingConfig); bookingConfig = null"
+    (dismissed)="dismissBooking()"
     (created)="created($event)"
   />
 }
@@ -448,7 +461,7 @@
 }
 @if (chat) {
   <app-modal heading="AI Planning Studio" (dismissed)="chat = false"
-    ><app-assistant (build)="openBuilder($event)"
+    ><app-assistant (build)="applyPlan($event)"
   /></app-modal>
 }
 @if (selectedRoom) {

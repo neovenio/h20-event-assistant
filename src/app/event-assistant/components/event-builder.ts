@@ -13,6 +13,8 @@ import { Modal } from './modal';
 export class EventBuilder implements OnInit {
   readonly store = inject(EventStore);
   readonly initial = input<EventConfiguration | null>(null);
+  /** Serialized config the session started from; defaults to `initial` (set after a booking round-trip). */
+  readonly initialBaseline = input<string | null>(null);
   readonly proposalId = input<string | null>(null);
   readonly dismissed = output<void>();
   readonly book = output<EventConfiguration>();
@@ -33,6 +35,12 @@ export class EventBuilder implements OnInit {
   readonly selectedStep = computed(() => this.steps[this.step() - 1]);
   ngOnInit(): void {
     if (this.initial()) this.config = JSON.parse(JSON.stringify(this.initial()));
+    this.baseline = this.initialBaseline() ?? JSON.stringify(this.config);
+  }
+  baseline = '';
+  /** True when the config differs from what the builder was opened with. */
+  dirty(): boolean {
+    return JSON.stringify(this.config) !== this.baseline;
   }
   get price() {
     return estimate(
