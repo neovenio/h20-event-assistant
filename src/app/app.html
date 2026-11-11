@@ -199,7 +199,7 @@
               </section>
             </div>
             <aside class="dashboard-aside">
-              <app-assistant (build)="openBuilder($event)" />
+              <app-assistant (build)="assistantPlan($event)" />
               <section class="panel">
                 <span class="eyebrow">ALLES OP ÉÉN LOCATIE</span>
                 <h3>Meer dan een evenement</h3>
@@ -432,10 +432,17 @@
     (saved)="builder.set(false); go('/my-proposals', 'Concept bewaard.')"
   />
 }
+@if (pendingPlan) {
+  <app-modal heading="Je huidige plan vervangen?" (dismissed)="cancelPlan()">
+    <p>Je hebt niet-bewaarde wijzigingen. Het voorstel van de assistent wordt een nieuw concept.</p>
+    <button type="button" class="primary" (click)="confirmPlan()">Vervangen</button>
+    <button type="button" class="text-button" (click)="cancelPlan()">Annuleren</button>
+  </app-modal>
+}
 @if (bookingConfig) {
   <app-booking-form
     [config]="bookingConfig"
-    (dismissed)="openBuilder(bookingConfig); bookingConfig = null"
+    (dismissed)="dismissBooking()"
     (created)="created($event)"
   />
 }
@@ -448,7 +455,7 @@
 }
 @if (chat) {
   <app-modal heading="AI Planning Studio" (dismissed)="chat = false"
-    ><app-assistant (build)="openBuilder($event)"
+    ><app-assistant (build)="assistantPlan($event)"
   /></app-modal>
 }
 @if (selectedRoom) {

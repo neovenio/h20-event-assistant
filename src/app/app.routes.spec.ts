@@ -88,6 +88,90 @@ describe('routing', () => {
     expect(state.initial).toBeNull();
   });
 
+  describe('builder edit target and assistant plans', () => {
+    const plan = () => ({ ...emptyConfiguration(), name: 'AI plan', participants: 77 });
+
+    async function openEditing() {
+      const fixture = await open('/my-proposals');
+      const app = fixture.componentInstance;
+      const saved = app.store.saveProposal({ ...emptyConfiguration(), name: 'X' });
+      app.openBuilder(saved.config, saved.id);
+      await fixture.whenStable();
+      return { fixture, app, saved };
+    }
+    const builderOf = (fixture: ReturnType<typeof TestBed.createComponent<App>>) =>
+      fixture.debugElement.query(By.directive(EventBuilder)).componentInstance as EventBuilder;
+
+    it('keeps the edit target through book and dismiss, then updates in place', async () => {
+      const { fixture, app, saved } = await openEditing();
+      builderOf(fixture).config.participants = 55;
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      const builder = builderOf(fixture);
+      expect(builder.proposalId()).toBe(saved.id);
+      expect(builder.config.participants).toBe(55);
+      builder.save();
+      expect(app.store.proposals().length).toBe(1);
+      expect(app.store.proposals()[0].id).toBe(saved.id);
+      expect(app.store.proposals()[0].config.participants).toBe(55);
+    });
+
+    it('keeps a new concept new through book and dismiss', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      app.startBooking(builderOf(fixture).config);
+      await fixture.whenStable();
+      app.dismissBooking();
+      await fixture.whenStable();
+      expect(builderOf(fixture).proposalId()).toBeNull();
+      builderOf(fixture).save();
+      expect(app.store.proposals().length).toBe(1);
+    });
+
+    it('replaces an unchanged open builder with an assistant plan and returns to step 1', async () => {
+      const fixture = await open('/plan');
+      const app = fixture.componentInstance;
+      builderOf(fixture).step.set(4);
+      app.assistantPlan(plan());
+      await fixture.whenStable();
+      expect(app.pendingPlan).toBeNull();
+      expect(builderOf(fixture).config.participants).toBe(77);
+      expect(builderOf(fixture).step()).toBe(1);
+    });
+
+    it('asks for confirmation when the builder has unsaved changes', async () => {
+      const { fixture, app, saved } = await openEditing();
+      builderOf(fixture).config.participants = 55;
+      app.assistantPlan(plan());
+      await fixture.whenStable();
+      expect(app.pendingPlan).not.toBeNull();
+      expect(fixture.nativeElement.textContent).toContain('Je huidige plan vervangen?');
+      app.cancelPlan();
+      await fixture.whenStable();
+      expect(app.pendingPlan).toBeNull();
+      expect(builderOf(fixture).config.participants).toBe(55);
+      expect(builderOf(fixture).proposalId()).toBe(saved.id);
+      app.assistantPlan(plan());
+      app.confirmPlan();
+      await fixture.whenStable();
+      expect(builderOf(fixture).config.participants).toBe(77);
+      expect(builderOf(fixture).step()).toBe(1);
+    });
+
+    it('saves an applied assistant plan as a new concept and leaves X unchanged', async () => {
+      const { fixture, app, saved } = await openEditing();
+      app.assistantPlan(plan());
+      await fixture.whenStable();
+      const builder = builderOf(fixture);
+      expect(builder.proposalId()).toBeNull();
+      builder.save();
+      expect(app.store.proposals().length).toBe(2);
+      expect(app.store.proposals().find((p) => p.id === saved.id)?.config.name).toBe('X');
+    });
+  });
+
   it('only shows the demo staff portal while no n8n backend is configured', async () => {
     const fixture = await open('/');
     const app = fixture.componentInstance;

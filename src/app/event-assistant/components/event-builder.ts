@@ -31,8 +31,20 @@ export class EventBuilder implements OnInit {
   config = emptyConfiguration();
   error = '';
   readonly selectedStep = computed(() => this.steps[this.step() - 1]);
+  private baseline = JSON.stringify(this.config);
   ngOnInit(): void {
-    if (this.initial()) this.config = JSON.parse(JSON.stringify(this.initial()));
+    if (this.initial()) this.replaceConfig(this.initial()!);
+  }
+  /** True when the current config differs from the one last applied via `initial`/replaceConfig. */
+  hasUnsavedChanges(): boolean {
+    return JSON.stringify(this.config) !== this.baseline;
+  }
+  /** Replaces the working config (e.g. with an assistant plan) and returns to step 1. */
+  replaceConfig(config: EventConfiguration): void {
+    this.config = JSON.parse(JSON.stringify(config));
+    this.baseline = JSON.stringify(this.config);
+    this.error = '';
+    this.step.set(1);
   }
   get price() {
     return estimate(

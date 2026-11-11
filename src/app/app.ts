@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -85,6 +86,9 @@ export class App {
   editingProposalId: string | null = null;
   builderConfig: EventConfiguration | null = null;
   bookingConfig: EventConfiguration | null = null;
+  pendingPlan: EventConfiguration | null = null;
+  private bookingProposalId: string | null = null;
+  private readonly builderRef = viewChild(EventBuilder);
   selectedRoom: Room | null = null;
   selectedBooking: Booking | null = null;
   chat = false;
@@ -200,8 +204,45 @@ export class App {
     });
   }
   startBooking(config: EventConfiguration): void {
+    this.bookingProposalId = this.editingProposalId;
     this.builder.set(false);
     this.bookingConfig = config;
+  }
+  /** Dismissing the booking form returns to the builder with the same config and edit target. */
+  dismissBooking(): void {
+    const config = this.bookingConfig;
+    this.bookingConfig = null;
+    this.openBuilder(config, this.bookingProposalId);
+  }
+  /** An assistant plan always becomes a new concept; it never targets a saved one. */
+  assistantPlan(plan: EventConfiguration | null): void {
+    const builder = this.builder() ? this.builderRef() : undefined;
+    if (!builder) {
+      this.openBuilder(plan);
+      return;
+    }
+    this.chat = false;
+    if (!plan) return;
+    if (builder.hasUnsavedChanges()) {
+      this.pendingPlan = plan;
+      this.cdr.markForCheck();
+    } else this.applyPlan(plan);
+  }
+  confirmPlan(): void {
+    const plan = this.pendingPlan;
+    this.pendingPlan = null;
+    this.cdr.markForCheck();
+    if (plan) this.applyPlan(plan);
+  }
+  cancelPlan(): void {
+    this.pendingPlan = null;
+    this.cdr.markForCheck();
+  }
+  private applyPlan(plan: EventConfiguration): void {
+    this.editingProposalId = null;
+    this.builderConfig = plan;
+    this.builderRef()?.replaceConfig(plan);
+    this.cdr.markForCheck();
   }
   created(booking: Booking): void {
     this.bookingConfig = null;
