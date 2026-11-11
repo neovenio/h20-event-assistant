@@ -169,6 +169,34 @@ function overlaps(a, b, c, d) {
 function today() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam' }).format(new Date());
 }
+const APPOINTMENT_SLOTS = [
+  { startTime: '10:00', endTime: '11:00' },
+  { startTime: '11:30', endTime: '12:30' },
+  { startTime: '14:00', endTime: '15:00' },
+  { startTime: '15:30', endTime: '16:30' },
+];
+const INTAKE_RESOURCE_ID = '__intake__';
+function validIsoDate(date) {
+  return (
+    typeof date === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    !Number.isNaN(Date.parse(`${date}T00:00:00Z`)) &&
+    new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
+  );
+}
+function isWeekday(date) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day !== 0 && day !== 6;
+}
+function isActiveAppointment(a) {
+  return Boolean(a) && a.status !== 'cancelled' && a.status !== 'rejected';
+}
+function publicAppointment(appointment) {
+  const result = JSON.parse(JSON.stringify(appointment));
+  delete result.claimStatus;
+  delete result.claimCreatedAt;
+  return result;
+}
 function parseRows(rows) {
   return rows
     .filter((row) => typeof row.payload === 'string')
@@ -258,6 +286,14 @@ function claimShape(item) {
       startTime: item.data.event.startTime,
       endTime: item.data.event.endTime,
     };
+  if (item.kind === 'appointment' && item.data && isActiveAppointment(item.data))
+    return {
+      rowId: item.rowId,
+      roomIds: [INTAKE_RESOURCE_ID],
+      date: item.data.date,
+      startTime: item.data.startTime,
+      endTime: item.data.endTime,
+    };
   return null;
 }
 const validId = (id) => id != null && id !== '' && Number.isFinite(Number(id));
@@ -310,6 +346,38 @@ function hasConflict(rows, ids, date, start, end, except = '') {
         overlaps(start, end, b.event.startTime, b.event.endTime),
     )
   );
+}
+function hasAppointmentClosure(rows, date, start, end) {
+  return records(rows, 'block').some(
+    (block) =>
+      block.type === 'Closure' &&
+      block.date === date &&
+      overlaps(start, end, block.startTime, block.endTime),
+  );
+}
+function hasAppointmentConflict(rows, date, start, end, except = '') {
+  return (
+    hasAppointmentClosure(rows, date, start, end) ||
+    records(rows, 'appointment').some(
+      (a) =>
+        a.id !== except &&
+        isActiveAppointment(a) &&
+        a.date === date &&
+        overlaps(start, end, a.startTime, a.endTime),
+    )
+  );
+}
+function availableAppointmentSlots(rows, date) {
+  if (!validIsoDate(date)) fail('Kies een geldige datum.');
+  const bookableDay = date >= today() && isWeekday(date);
+  return {
+    date,
+    slots: APPOINTMENT_SLOTS.map((slot) => ({
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      available: bookableDay && !hasAppointmentConflict(rows, date, slot.startTime, slot.endTime),
+    })),
+  };
 }
 function validateRequest(body, rows) {
   const raw = body.config ?? {};
@@ -601,12 +669,17 @@ function requestContext(body, rows, validated, booking, route, rateLimitWrite, c
     ),
   };
 }
-function lostClaim(rowId) {
+function lostClaim(rowId, kind = 'booking') {
   return {
     route: 'lost',
     status: 409,
     deleteRowId: Number(rowId),
-    response: { error: 'Deze datum of tijd overlapt een aanvraag of blokkade.' },
+    response: {
+      error:
+        kind === 'appointment'
+          ? 'Dit tijdslot is niet meer beschikbaar. Kies een ander moment.'
+          : 'Deze datum of tijd overlapt een aanvraag of blokkade.',
+    },
   };
 }
 /** A retry that finds its own claim still 'claiming' verifies again instead of trusting it. */
@@ -631,6 +704,22 @@ function reverifyRequest(body, rows, existing, nowMs = Date.now()) {
     nowMs,
   );
 }
+function reverifyAppointment(rows, existing) {
+  if (!validId(existing.rowId))
+    fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
+  const claim = claimShape(existing);
+  if (
+    !resolveClaim(rows, claim).won ||
+    hasAppointmentClosure(rows, existing.data.date, existing.data.startTime, existing.data.endTime)
+  )
+    return lostClaim(existing.rowId, 'appointment');
+  const held = { ...existing.data, claimStatus: 'held' };
+  return saveResponse(
+    row('appointment', held.id, held, { ownerUid: existing.ownerUid, audit: existing.audit }),
+    { appointment: publicAppointment(held) },
+    201,
+  );
+}
 /**
  * Second half of the reserve-first protocol. `rows` is a fresh read that includes the claim row and
  * `ownRowId` is the system id returned by our own insert (never rediscovered by recordId, which a
@@ -647,8 +736,13 @@ function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now(
   }
   const data = JSON.parse(context.claimRow.payload).data;
   const claim = claimShape({ kind: context.claimKind, data, rowId: ownRowId });
-  if (!resolveClaim(rows, claim).won) return lostClaim(ownRowId);
-  if (context.claimKind === 'block') {
+  if (
+    !resolveClaim(rows, claim).won ||
+    (context.claimKind === 'appointment' &&
+      hasAppointmentClosure(rows, data.date, data.startTime, data.endTime))
+  )
+    return lostClaim(ownRowId, context.claimKind);
+  if (context.claimKind === 'block' || context.claimKind === 'appointment') {
     const parsed = JSON.parse(context.claimRow.payload);
     const held = { ...parsed, data: { ...parsed.data, claimStatus: 'held' } };
     return saveResponse(
@@ -683,9 +777,68 @@ function publicAction(body, allRows, nowMs = Date.now()) {
       bookings: rows
         .filter((r) => r.kind === 'booking' && r.ownerUid === body._identity.uid)
         .map((r) => publicBooking(r.data)),
+      appointments: rows
+        .filter((r) => r.kind === 'appointment' && r.ownerUid === body._identity.uid)
+        .map((r) => publicAppointment(r.data)),
     });
   }
   if (body.action === 'catalogue') return response(catalogue(rows));
+  if (body.action === 'appointment-slots')
+    return response(availableAppointmentSlots(rows, body.date));
+  if (body.action === 'book-appointment') {
+    if (!body._identity?.uid) fail('Log eerst in.', 401);
+    if (!/^[a-f0-9-]{36}$/.test(body.requestId)) fail('Ongeldige aanvraagreferentie.');
+    const existing = rows.find((r) => r.kind === 'appointment' && r.data?.id === body.requestId);
+    if (existing) {
+      if (existing.ownerUid !== body._identity.uid) fail('Ongeldige aanvraagreferentie.', 409);
+      if (claimStatusOf(existing.data) === 'claiming' && isActiveAppointment(existing.data))
+        return reverifyAppointment(allRows, existing);
+      return response({ appointment: publicAppointment(existing.data) });
+    }
+    if (!validIsoDate(body.date) || body.date < today() || !isWeekday(body.date))
+      fail('Kies een geldige werkdag vanaf vandaag.');
+    const chosen = APPOINTMENT_SLOTS.find(
+      (s) => s.startTime === body.startTime && (!body.endTime || s.endTime === body.endTime),
+    );
+    if (!chosen) fail('Kies een geldig tijdslot.');
+    if (!['location_tour', 'online_intake'].includes(body.format))
+      fail('Kies een geldige afspraakvorm.');
+    const c = body.customer ?? {};
+    if (!text(c.fullName, 120) || !/^\S+@\S+\.\S+$/.test(text(c.email, 254)))
+      fail('Naam en geldig e-mailadres zijn verplicht.');
+    if (typeof body.notes === 'string' && body.notes.trim().length > 1000)
+      fail('Toelichting mag maximaal 1000 tekens bevatten.');
+    const slotState = availableAppointmentSlots(rows, body.date).slots.find(
+      (s) => s.startTime === chosen.startTime && s.endTime === chosen.endTime,
+    );
+    if (!slotState?.available)
+      fail('Dit tijdslot is niet meer beschikbaar. Kies een ander moment.', 409);
+    const appointment = {
+      id: body.requestId,
+      reference: `AF-${body.requestId.slice(0, 8).toUpperCase()}`,
+      status: 'pending',
+      date: body.date,
+      startTime: chosen.startTime,
+      endTime: chosen.endTime,
+      format: body.format,
+      customer: {
+        fullName: text(c.fullName, 120),
+        email: text(c.email, 254),
+        phone: text(c.phone, 40),
+        company: text(c.company, 160),
+      },
+      notes: text(body.notes, 1000),
+      createdAt: new Date().toISOString(),
+      claimStatus: 'claiming',
+    };
+    return {
+      route: 'claim',
+      status: 201,
+      claimKind: 'appointment',
+      claimRow: row('appointment', appointment.id, appointment, { ownerUid: body._identity.uid }),
+      response: { appointment: publicAppointment(appointment) },
+    };
+  }
   if (body.action === 'lookup') {
     const found = getBooking(rows, body.id);
     if (found.ownerUid && found.ownerUid !== body._identity?.uid)
@@ -862,12 +1015,45 @@ function adminAction(body, allRows) {
             ? { ...item.data, claimCreatedAt: item.rowCreatedAt }
             : item.data,
         ),
+      appointments: rows
+        .filter((item) => item.kind === 'appointment')
+        .map((item) =>
+          claimStatusOf(item.data) === 'claiming'
+            ? { ...item.data, claimCreatedAt: item.rowCreatedAt }
+            : item.data,
+        ),
       blocks: records(rows, 'block'),
       logs: rows
         .flatMap((item) => array(item.audit))
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
       sources: records(rows, 'source'),
     });
+  if (body.action === 'appointment-status') {
+    const found = rows.find((item) => item.kind === 'appointment' && item.data?.id === body.id);
+    if (!found) fail('Afspraak niet gevonden.', 404);
+    if (!['confirm', 'cancel'].includes(body.actionType)) fail('Ongeldige status.');
+    const a = JSON.parse(JSON.stringify(found.data));
+    if (['cancelled', 'rejected'].includes(a.status)) fail('Deze afspraak is al afgesloten.', 409);
+    if (body.actionType === 'confirm') {
+      if (claimStatusOf(a) === 'claiming')
+        fail('Deze afspraak wordt nog verwerkt. Probeer het later opnieuw.', 409);
+      if (hasAppointmentConflict(rows, a.date, a.startTime, a.endTime, a.id))
+        fail('Dit tijdslot overlapt een andere afspraak of sluiting.', 409);
+      a.status = 'confirmed';
+    } else {
+      a.status = 'cancelled';
+    }
+    const updated = audit(
+      { ...found, data: a },
+      body.actionType === 'confirm' ? 'Afspraak bevestigd' : 'Afspraak geannuleerd',
+      found.data.status,
+      a.status,
+    );
+    return saveResponse(
+      row('appointment', a.id, a, { ownerUid: found.ownerUid, audit: updated.audit }),
+      { appointment: publicAppointment(a) },
+    );
+  }
   if (['booking-status', 'booking-note', 'review'].includes(body.action)) {
     const found = getBooking(rows, body.id);
     const b = JSON.parse(JSON.stringify(found.data));
@@ -1029,4 +1215,8 @@ if (typeof module !== 'undefined')
     hasConflict,
     resolveClaim,
     settleClaim,
+    APPOINTMENT_SLOTS,
+    hasAppointmentConflict,
+    availableAppointmentSlots,
+    publicAppointment,
   };

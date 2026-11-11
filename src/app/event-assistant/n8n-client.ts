@@ -24,7 +24,7 @@ export class N8nClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(admin || action !== 'catalogue'
+          ...(admin || !['catalogue', 'appointment-slots'].includes(action)
             ? { Authorization: `Bearer ${await this.auth.token()}` }
             : {}),
         },

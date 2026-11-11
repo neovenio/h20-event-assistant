@@ -19,7 +19,7 @@ import { filter, map } from 'rxjs';
 import { PAGE_PATHS, pageForPath } from './app.routes';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { EventStore } from './event-assistant/event-store';
-import { Booking, EventConfiguration, Room } from './event-assistant/models';
+import { Appointment, Booking, EventConfiguration, Room } from './event-assistant/models';
 import { emptyConfiguration } from './event-assistant/event-utils';
 import { EventBuilder } from './event-assistant/components/event-builder';
 import { BookingForm } from './event-assistant/components/booking-form';
@@ -27,6 +27,7 @@ import { BookingDetail } from './event-assistant/components/booking-detail';
 import { Modal } from './event-assistant/components/modal';
 import { Assistant } from './event-assistant/components/assistant';
 import { Icon } from './event-assistant/components/icon';
+import { AppointmentModal } from './event-assistant/components/appointment-modal';
 interface AdminPortal {
   selectBooking: OutputRef<Booking>;
   newBooking: OutputRef<void>;
@@ -47,6 +48,7 @@ interface BuilderHandle {
     BookingDetail,
     Modal,
     Assistant,
+    AppointmentModal,
     Icon,
     RouterLink,
     RouterLinkActive,
@@ -98,6 +100,7 @@ export class App implements OnDestroy {
   bookingConfig: EventConfiguration | null = null;
   selectedRoom: Room | null = null;
   selectedBooking: Booking | null = null;
+  appointmentOpen = false;
   chat = false;
   login = false;
   staffToken = '';
@@ -145,9 +148,15 @@ export class App implements OnDestroy {
       try {
         await this.auth.restore();
         if (this.auth.user() && this.store.live()) {
-          const result = await this.store.api.request<{ bookings: Booking[] }>('my-requests');
+          const result = await this.store.api.request<{
+            bookings: Booking[];
+            appointments?: Appointment[];
+          }>('my-requests');
           this.store.bookings.set(result.bookings);
           this.store.ownBookingIds.set(result.bookings.map((b) => b.id));
+          const appointments = result.appointments ?? [];
+          this.store.appointments.set(appointments);
+          this.store.ownAppointmentIds.set(appointments.map((a) => a.id));
           // A hard refresh on /admin restores the staff session; load the staff data too.
           if (this.auth.staff()) await this.store.refreshAdmin();
         }
@@ -263,11 +272,33 @@ export class App implements OnDestroy {
       : 'Je demoaanvraag is in deze browser opgeslagen. Er is niets verzonden.';
     this.receipt = this.store.live() ? this.store.receiptLink(booking.id) : '';
   }
+  appointmentCreated(appointment: Appointment): void {
+    this.appointmentOpen = false;
+    void this.router.navigateByUrl('/' + PAGE_PATHS['my-proposals']);
+    this.notice = this.store.live()
+      ? `Afspraak ${appointment.reference} is aangevraagd en wacht op bevestiging.`
+      : `Demoafspraak ${appointment.reference} is in deze browser opgeslagen.`;
+    this.receipt = '';
+  }
+  appointmentStatusLabel(status: Appointment['status']): string {
+    switch (status) {
+      case 'confirmed':
+        return 'Bevestigd';
+      case 'cancelled':
+        return 'Geannuleerd';
+      case 'rejected':
+        return 'Afgewezen';
+      default:
+        return 'In afwachting';
+    }
+  }
   async signIn(): Promise<void> {
     this.auth.demoStaff.set(false);
     if (this.store.live()) {
       this.store.bookings.set([]);
       this.store.ownBookingIds.set([]);
+      this.store.appointments.set([]);
+      this.store.ownAppointmentIds.set([]);
     }
     this.loginBusy = true;
     this.loginError = '';
@@ -278,9 +309,15 @@ export class App implements OnDestroy {
       this.login = false;
       void this.router.navigateByUrl('/' + PAGE_PATHS['my-proposals']);
       if (this.store.live()) {
-        const result = await this.store.api.request<{ bookings: Booking[] }>('my-requests');
+        const result = await this.store.api.request<{
+          bookings: Booking[];
+          appointments?: Appointment[];
+        }>('my-requests');
         this.store.bookings.set(result.bookings);
         this.store.ownBookingIds.set(result.bookings.map((b) => b.id));
+        const appointments = result.appointments ?? [];
+        this.store.appointments.set(appointments);
+        this.store.ownAppointmentIds.set(appointments.map((a) => a.id));
       }
       if (this.auth.staff() && this.store.live()) {
         await this.store.refreshAdmin();

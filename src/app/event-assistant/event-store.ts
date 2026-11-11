@@ -1,6 +1,9 @@
 import { Injectable, PendingTasks, afterNextRender, computed, signal, inject } from '@angular/core';
 import {
   ActivityLog,
+  Appointment,
+  AppointmentInput,
+  AppointmentSlot,
   AvailabilityBlock,
   Booking,
   CateringPackage,
@@ -12,7 +15,19 @@ import {
   ScrapedSource,
 } from './models';
 import { N8nClient } from './n8n-client';
-import { ACTIVITIES, bookingRoomIds, conflict, duration, estimate, localDate } from './event-utils';
+import {
+  ACTIVITIES,
+  APPOINTMENT_SLOTS,
+  appointmentConflict,
+  bookingRoomIds,
+  computeAppointmentSlots,
+  conflict,
+  duration,
+  estimate,
+  isValidIsoDate,
+  isWeekdayDate,
+  localDate,
+} from './event-utils';
 
 const STORAGE_KEY = 'h20-angular-demo-v1';
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -25,6 +40,8 @@ interface DemoState {
   upgrades: EventUpgrade[];
   proposals: ProposalItem[];
   ownBookingIds: string[];
+  appointments?: Appointment[];
+  ownAppointmentIds?: string[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -38,6 +55,7 @@ export class EventStore {
   readonly sources = signal<ScrapedSource[]>([]);
   private pendingRequest: { signature: string; requestId: string; customerToken: string } | null =
     null;
+  private pendingAppointment: { signature: string; requestId: string } | null = null;
   private receipts: Record<string, string> = {};
   readonly rooms = signal<Room[]>([]);
   readonly bookings = signal<Booking[]>([]);
@@ -47,10 +65,15 @@ export class EventStore {
   readonly upgrades = signal<EventUpgrade[]>([]);
   readonly proposals = signal<ProposalItem[]>([]);
   readonly ownBookingIds = signal<string[]>([]);
+  readonly appointments = signal<Appointment[]>([]);
+  readonly ownAppointmentIds = signal<string[]>([]);
   readonly storageWarning = signal('');
   readonly activeRooms = computed(() => this.rooms().filter((room) => room.isActive));
   readonly ownBookings = computed(() =>
     this.bookings().filter((booking) => this.ownBookingIds().includes(booking.id)),
+  );
+  readonly ownAppointments = computed(() =>
+    this.appointments().filter((appointment) => this.ownAppointmentIds().includes(appointment.id)),
   );
   private browserReady = false;
 
@@ -71,6 +94,8 @@ export class EventStore {
             this.logs.set([]);
             this.catering.set([]);
             this.upgrades.set([]);
+            this.appointments.set([]);
+            this.ownAppointmentIds.set([]);
             await this.refreshCatalogue();
             this.loading.set(false);
             return;
@@ -97,6 +122,8 @@ export class EventStore {
             this.upgrades.set(value.upgrades);
             this.proposals.set(value.proposals);
             this.ownBookingIds.set(value.ownBookingIds);
+            this.appointments.set(value.appointments ?? []);
+            this.ownAppointmentIds.set(value.ownAppointmentIds ?? []);
             this.loading.set(false);
             return;
           }
@@ -129,6 +156,13 @@ export class EventStore {
         'proposals',
         'ownBookingIds',
       ].every((key) => Array.isArray(value[key as keyof DemoState])) &&
+      (value.appointments === undefined ||
+        (Array.isArray(value.appointments) &&
+          value.appointments.every(
+            (item) =>
+              typeof item.id === 'string' && typeof item.date === 'string' && !!item.customer,
+          ))) &&
+      (value.ownAppointmentIds === undefined || Array.isArray(value.ownAppointmentIds)) &&
       value.rooms.every((room) => typeof room.id === 'string' && Array.isArray(room.facilities)) &&
       value.bookings.every(
         (booking) =>
@@ -158,6 +192,8 @@ export class EventStore {
           upgrades: this.upgrades(),
           proposals: this.proposals(),
           ownBookingIds: this.ownBookingIds(),
+          appointments: this.appointments(),
+          ownAppointmentIds: this.ownAppointmentIds(),
         } satisfies DemoState),
       );
       this.storageWarning.set('');
@@ -228,6 +264,7 @@ export class EventStore {
     this.upgrades.set(data.upgrades);
     this.sources.set(data.sources ?? []);
     this.activities.set(data.activities ?? []);
+    this.appointments.set(data.appointments ?? []);
   }
   async login(token: string): Promise<void> {
     await this.api.login(token);
@@ -239,6 +276,8 @@ export class EventStore {
       this.bookings.set([]);
       this.blocks.set([]);
       this.logs.set([]);
+      this.appointments.set([]);
+      this.ownAppointmentIds.set([]);
     }
   }
   receiptLink(id: string): string {
@@ -601,5 +640,136 @@ export class EventStore {
     }
     this.blocks.update((items) => items.filter((item) => item.id !== id));
     this.log('Blokkade verwijderd', id);
+  }
+  async getAppointmentSlots(date: string): Promise<AppointmentSlot[]> {
+    if (!isValidIsoDate(date)) throw new Error('Kies een geldige datum.');
+    if (this.live()) {
+      const data = await this.api.request<{ date: string; slots: AppointmentSlot[] }>(
+        'appointment-slots',
+        { date },
+      );
+      if (!Array.isArray(data.slots)) throw new Error('Ongeldig antwoord van n8n.');
+      return data.slots;
+    }
+    return computeAppointmentSlots(date, this.appointments(), this.blocks());
+  }
+  async createAppointment(input: AppointmentInput): Promise<Appointment> {
+    if (!isValidIsoDate(input.date) || input.date < localDate() || !isWeekdayDate(input.date)) {
+      throw new Error('Kies een geldige werkdag vanaf vandaag.');
+    }
+    const chosen = APPOINTMENT_SLOTS.find(
+      (slot) =>
+        slot.startTime === input.startTime && (!input.endTime || slot.endTime === input.endTime),
+    );
+    if (!chosen) throw new Error('Kies een geldig tijdslot.');
+    if (!['location_tour', 'online_intake'].includes(input.format)) {
+      throw new Error('Kies een geldige afspraakvorm.');
+    }
+    const fullName = input.customer.fullName.trim().slice(0, 120);
+    const email = input.customer.email.trim().slice(0, 254);
+    if (!fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('Vul je naam en een geldig e-mailadres in.');
+    }
+    const rawNotes = (input.notes ?? '').trim();
+    if (rawNotes.length > 1000) {
+      throw new Error('Toelichting mag maximaal 1000 tekens bevatten.');
+    }
+    const customer = {
+      fullName,
+      email,
+      phone: (input.customer.phone ?? '').trim().slice(0, 40),
+      company: (input.customer.company ?? '').trim().slice(0, 160),
+    };
+    const notes = rawNotes.slice(0, 1000);
+    if (this.live()) {
+      const payload = {
+        date: input.date,
+        startTime: chosen.startTime,
+        endTime: chosen.endTime,
+        format: input.format,
+        customer,
+        notes,
+      };
+      const signature = JSON.stringify(payload);
+      if (this.pendingAppointment?.signature !== signature) {
+        this.pendingAppointment = { signature, requestId: this.id() };
+      }
+      const { requestId } = this.pendingAppointment;
+      const result = await this.api.request<{ appointment: Appointment }>('book-appointment', {
+        ...payload,
+        requestId,
+      });
+      this.appointments.update((items) => [
+        result.appointment,
+        ...items.filter((item) => item.id !== result.appointment.id),
+      ]);
+      this.ownAppointmentIds.update((ids) => [...new Set([...ids, result.appointment.id])]);
+      this.pendingAppointment = null;
+      return result.appointment;
+    }
+    const slotState = computeAppointmentSlots(input.date, this.appointments(), this.blocks()).find(
+      (slot) => slot.startTime === chosen.startTime && slot.endTime === chosen.endTime,
+    );
+    if (!slotState?.available) {
+      throw new Error('Dit tijdslot is niet meer beschikbaar. Kies een ander moment.');
+    }
+    const id = this.id();
+    const reference = `AF-${id.slice(0, 8).toUpperCase()}`;
+    const appointment: Appointment = {
+      id,
+      reference,
+      status: 'pending',
+      date: input.date,
+      startTime: chosen.startTime,
+      endTime: chosen.endTime,
+      format: input.format,
+      customer,
+      notes,
+      createdAt: new Date().toISOString(),
+    };
+    this.appointments.update((items) => [appointment, ...items]);
+    this.ownAppointmentIds.update((ids) => [...ids, id]);
+    this.log('Demoafspraak ingepland', reference);
+    return appointment;
+  }
+  async changeAppointmentStatus(id: string, action: 'confirm' | 'cancel'): Promise<void> {
+    if (this.live()) {
+      await this.api.request('appointment-status', { id, actionType: action }, true);
+      await this.refreshAdmin();
+      return;
+    }
+    const original = this.appointments().find((item) => item.id === id);
+    if (!original) return;
+    if (['cancelled', 'rejected'].includes(original.status)) {
+      throw new Error('Deze afspraak is al afgesloten.');
+    }
+    const appointment = clone(original);
+    if (action === 'confirm') {
+      if (appointment.claimStatus === 'claiming') {
+        throw new Error('Deze afspraak wordt nog verwerkt. Probeer het later opnieuw.');
+      }
+      if (
+        appointmentConflict(
+          appointment.date,
+          appointment.startTime,
+          appointment.endTime,
+          this.appointments(),
+          this.blocks(),
+          id,
+        )
+      ) {
+        throw new Error('Dit tijdslot overlapt een andere afspraak of sluiting.');
+      }
+      appointment.status = 'confirmed';
+    } else {
+      appointment.status = 'cancelled';
+    }
+    this.appointments.update((items) => items.map((item) => (item.id === id ? appointment : item)));
+    this.log(
+      action === 'confirm' ? 'Afspraak bevestigd' : 'Afspraak geannuleerd',
+      appointment.reference,
+      original.status,
+      appointment.status,
+    );
   }
 }

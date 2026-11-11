@@ -1,4 +1,6 @@
 import {
+  Appointment,
+  AppointmentSlot,
   Booking,
   EventConfiguration,
   Room,
@@ -167,3 +169,72 @@ export const ACTIVITIES = [
     tag: 'Toegankelijk',
   },
 ];
+
+export const APPOINTMENT_SLOTS: readonly { startTime: string; endTime: string }[] = [
+  { startTime: '10:00', endTime: '11:00' },
+  { startTime: '11:30', endTime: '12:30' },
+  { startTime: '14:00', endTime: '15:00' },
+  { startTime: '15:30', endTime: '16:30' },
+];
+
+export function isValidIsoDate(date: string): boolean {
+  return (
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    !Number.isNaN(Date.parse(`${date}T00:00:00Z`)) &&
+    new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
+  );
+}
+
+export function isWeekdayDate(date: string): boolean {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day !== 0 && day !== 6;
+}
+
+export function nextWeekday(from = new Date()): string {
+  const candidate = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+  while (candidate.getDay() === 0 || candidate.getDay() === 6) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+  return localDate(candidate);
+}
+
+export function appointmentConflict(
+  date: string,
+  start: string,
+  end: string,
+  appointments: Appointment[],
+  blocks: AvailabilityBlock[],
+  exceptId = '',
+): boolean {
+  return (
+    blocks.some(
+      (block) =>
+        block.type === 'Closure' &&
+        block.date === date &&
+        overlaps(start, end, block.startTime, block.endTime),
+    ) ||
+    appointments.some(
+      (appointment) =>
+        appointment.id !== exceptId &&
+        appointment.status !== 'cancelled' &&
+        appointment.status !== 'rejected' &&
+        appointment.date === date &&
+        overlaps(start, end, appointment.startTime, appointment.endTime),
+    )
+  );
+}
+
+export function computeAppointmentSlots(
+  date: string,
+  appointments: Appointment[],
+  blocks: AvailabilityBlock[],
+  todayStr = localDate(),
+): AppointmentSlot[] {
+  const bookableDay = isValidIsoDate(date) && date >= todayStr && isWeekdayDate(date);
+  return APPOINTMENT_SLOTS.map((slot) => ({
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    available:
+      bookableDay && !appointmentConflict(date, slot.startTime, slot.endTime, appointments, blocks),
+  }));
+}

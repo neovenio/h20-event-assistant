@@ -125,3 +125,46 @@ export interface ScrapedSource {
   catalogueKind: string;
   suggestedItem?: Room | CateringPackage | EventUpgrade | ActivityOption;
 }
+
+export type AppointmentFormat = 'location_tour' | 'online_intake';
+export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'rejected';
+
+export interface AppointmentSlot {
+  startTime: string;
+  endTime: string;
+  available: boolean;
+}
+
+export interface Appointment {
+  id: string;
+  reference: string;
+  status: AppointmentStatus;
+  date: string;
+  startTime: string;
+  endTime: string;
+  format: AppointmentFormat;
+  customer: {
+    fullName: string;
+    email: string;
+    phone: string;
+    company: string;
+  };
+  notes: string;
+  createdAt: string;
+  claimStatus?: 'claiming' | 'held';
+  claimCreatedAt?: string;
+}
+
+export interface AppointmentInput {
+  date: string;
+  startTime: string;
+  endTime?: string;
+  format: AppointmentFormat;
+  customer: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    company?: string;
+  };
+  notes?: string;
+}
