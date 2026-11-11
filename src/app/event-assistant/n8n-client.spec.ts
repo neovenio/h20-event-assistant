@@ -42,4 +42,19 @@ describe('n8n client', () => {
     await expect(client.login('invalid')).rejects.toThrow();
     expect(client.authenticated()).toBe(false);
   });
+  it('attaches Firebase Bearer token to chat requests while keeping catalogue public', async () => {
+    const client = TestBed.inject(N8nClient);
+    client.configure('https://example.test/webhook/h20');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ reply: 'Hallo', rooms: [], catering: [], upgrades: [], activities: [] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await client.request('catalogue');
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    await client.request('chat', { message: 'Hallo' });
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer test-token');
+  });
 });

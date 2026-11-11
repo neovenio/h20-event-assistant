@@ -203,6 +203,25 @@ function apiWorkflow(admin) {
   if (!admin) {
     nodes.push(check('Needs Gemini', 'gemini', 1100, -140));
     nodes.push(
+      code(
+        'Rate limit payload',
+        'return [{json:$("Needs Gemini").first().json.rateLimitWrite}];',
+        1320,
+        -220,
+      ),
+    );
+    nodes.push(upsert('Record rate limit', 1540, -220));
+    nodes[nodes.length - 1].onError = 'continueRegularOutput';
+    nodes.push(
+      code(
+        'After rate limit',
+        `const saved=$input.all();if(saved.some(item=>item.json.error))return [{json:{route:'respond',status:503,response:{error:'De database is niet beschikbaar.'}}}];return [{json:$('Needs Gemini').first().json}];`,
+        1760,
+        -220,
+      ),
+    );
+    nodes.push(check('Rate limit recorded', 'gemini', 1980, -220));
+    nodes.push(
       node(
         'Gemini',
         'httpRequest',
@@ -216,8 +235,8 @@ function apiWorkflow(admin) {
           jsonBody: '={{ $json.geminiBody }}',
           options: { timeout: 45000 },
         },
-        1320,
-        -140,
+        2200,
+        -220,
         { onError: 'continueRegularOutput' },
       ),
     );
@@ -225,15 +244,20 @@ function apiWorkflow(admin) {
       code(
         'Validate AI output',
         `${domain}\ntry{return [{json:finishGemini($('Route request').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??502,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
-        1540,
-        -140,
+        2420,
+        -220,
       ),
     );
-    nodes.push(code('Result', 'return $input.all();', 1760));
+    nodes.push(code('Result', 'return $input.all();', 2640));
     connect(connections, 'Settle claim', 'Needs Gemini');
     connect(connections, 'Needs claim', 'Needs Gemini', 1);
-    connect(connections, 'Needs Gemini', 'Gemini');
+    connect(connections, 'Needs Gemini', 'Rate limit payload');
     connect(connections, 'Needs Gemini', 'Result', 1);
+    connect(connections, 'Rate limit payload', 'Record rate limit');
+    connect(connections, 'Record rate limit', 'After rate limit');
+    connect(connections, 'After rate limit', 'Rate limit recorded');
+    connect(connections, 'Rate limit recorded', 'Gemini');
+    connect(connections, 'Rate limit recorded', 'Result', 1);
     connect(connections, 'Gemini', 'Validate AI output');
     connect(connections, 'Validate AI output', 'Result');
   } else {
@@ -241,7 +265,7 @@ function apiWorkflow(admin) {
     connect(connections, 'Needs claim', 'Result', 1);
     connect(connections, 'Settle claim', 'Result');
   }
-  const offset = admin ? 1980 : 1980;
+  const offset = admin ? 1980 : 2860;
   nodes.push(check('Needs delete', 'lost', offset - 220, 160));
   nodes.push(
     node(
@@ -538,7 +562,7 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   workflow.nodes.push(
     code(
       'Access',
-      `const request=$input.first().json;return [{json:{route:${admin ? 'true' : "!['catalogue','chat'].includes(request.body?.action)"}?'verify':'public',body:request.body??{}}}];`,
+      `${authSource}\nconst request=$input.first().json;return [{json:{route:${admin ? 'true' : "request.body?.action !== 'catalogue'"}?'verify':'public',clientKey:clientKeyFromHeaders(request.headers),body:request.body??{}}}];`,
       -900,
       400,
     ),
@@ -565,7 +589,7 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   workflow.nodes.push(
     code(
       'Verified access',
-      `${authSource}\ntry{const identity=verifiedIdentity($input.first().json,${admin});return [{json:{route:'allowed',body:{...$('Access').first().json.body,_identity:identity}}}];}catch{return [{json:{route:'denied',status:401,response:{error:'Inloggen vereist of onvoldoende rechten.'}}}];}`,
+      `${authSource}\ntry{const access=$('Access').first().json;const identity=verifiedIdentity($input.first().json,${admin});return [{json:{route:'allowed',body:{...access.body,_identity:identity,_clientKey:access.clientKey}}}];}catch{return [{json:{route:'denied',status:401,response:{error:'Inloggen vereist of onvoldoende rechten.'}}}];}`,
       -220,
       300,
     ),
@@ -573,7 +597,7 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   workflow.nodes.push(
     code(
       'Public access',
-      `return [{json:{route:'allowed',body:{...$('Access').first().json.body,_identity:null}}}];`,
+      `const access=$('Access').first().json;return [{json:{route:'allowed',body:{...access.body,_identity:null,_clientKey:access.clientKey}}}];`,
       -440,
       550,
     ),
@@ -596,7 +620,8 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
     "$('Webhook').first().json.body??{}",
     "$('Access context').first().json.body??{}",
   );
-  workflow.nodes.find((n) => n.name === 'Setup').parameters.content =
-    'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table and Gemini credentials, then publish. No shared staff password is used.';
+  workflow.nodes.find((n) => n.name === 'Setup').parameters.content = admin
+    ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
+    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-IP (SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
   fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
 }

@@ -1,5 +1,152 @@
 /* Shared by generated n8n Code nodes and the local tests. No Node server is required. */
 const MAX_TEXT = 3000;
+const RATE_LIMIT_WINDOW_MS = 3600_000;
+const RATE_LIMITS = {
+  chat: { perClient: 20, global: 120, windowMs: RATE_LIMIT_WINDOW_MS },
+  'event-request': { perClient: 5, global: 30, windowMs: RATE_LIMIT_WINDOW_MS },
+};
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+function sha256(input) {
+  const str = String(input);
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    let code = str.charCodeAt(i);
+    if (code < 0x80) bytes.push(code);
+    else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+      code = 0x10000 + (((code & 0x3ff) << 10) | (str.charCodeAt(++i) & 0x3ff));
+      bytes.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
+    } else bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+  }
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  const hi = Math.floor(bitLen / 0x100000000);
+  const lo = bitLen >>> 0;
+  bytes.push(
+    (hi >>> 24) & 255,
+    (hi >>> 16) & 255,
+    (hi >>> 8) & 255,
+    hi & 255,
+    (lo >>> 24) & 255,
+    (lo >>> 16) & 255,
+    (lo >>> 8) & 255,
+    lo & 255,
+  );
+  let h0 = 0x6a09e667,
+    h1 = 0xbb67ae85,
+    h2 = 0x3c6ef372,
+    h3 = 0xa54ff53a,
+    h4 = 0x510e527f,
+    h5 = 0x9b05688c,
+    h6 = 0x1f83d9ab,
+    h7 = 0x5be0cd19;
+  const w = new Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let offset = 0; offset < bytes.length; offset += 64) {
+    for (let i = 0; i < 16; i++) {
+      const j = offset + i * 4;
+      w[i] = (bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j + 2] << 8) | bytes[j + 3] | 0;
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let a = h0,
+      b = h1,
+      c = h2,
+      d = h3,
+      e = h4,
+      f = h5,
+      g = h6,
+      h = h7;
+    for (let i = 0; i < 64; i++) {
+      const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + s1 + ch + SHA256_K[i] + w[i]) | 0;
+      const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (s0 + maj) | 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + t1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) | 0;
+    }
+    h0 = (h0 + a) | 0;
+    h1 = (h1 + b) | 0;
+    h2 = (h2 + c) | 0;
+    h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0;
+    h5 = (h5 + f) | 0;
+    h6 = (h6 + g) | 0;
+    h7 = (h7 + h) | 0;
+  }
+  return [h0, h1, h2, h3, h4, h5, h6, h7]
+    .map((v) => (v >>> 0).toString(16).padStart(8, '0'))
+    .join('');
+}
+function hashClientKey(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) return '';
+  if (/^sha256:[0-9a-f]{64}$/.test(normalized)) return normalized;
+  return `sha256:${sha256(`h20-rl:${normalized.toLowerCase()}`)}`;
+}
+function resolveClientKey(body) {
+  const raw =
+    text(body?._clientKey, 200) ||
+    (body?._identity?.uid ? `uid:${body._identity.uid}` : 'anonymous');
+  return hashClientKey(raw);
+}
+function checkRateLimit(rows, action, clientKey, nowMs = Date.now()) {
+  const limit = RATE_LIMITS[action];
+  if (!limit) fail('Onbekende actie.', 404);
+  const hashedKey = hashClientKey(text(clientKey, 200) || 'anonymous');
+  const recordId = `ratelimit:${action}`;
+  const existing = array(rows).find(
+    (item) => item.kind === 'ratelimit' && item.recordId === recordId,
+  );
+  let stored = existing?.data;
+  if (!stored && typeof existing?.payload === 'string') {
+    try {
+      stored = JSON.parse(existing.payload)?.data;
+    } catch {
+      stored = null;
+    }
+  }
+  const cutoff = nowMs - limit.windowMs;
+  const activeGlobal = array(stored?.global).filter((ts) => Number.isFinite(ts) && ts > cutoff);
+  const rawClients = stored?.clients && typeof stored.clients === 'object' ? stored.clients : {};
+  const clients = {};
+  for (const [key, stamps] of Object.entries(rawClients)) {
+    const active = array(stamps).filter((ts) => Number.isFinite(ts) && ts > cutoff);
+    if (active.length) clients[key] = active;
+  }
+  const activeClient = clients[hashedKey] ?? [];
+  if (activeClient.length >= limit.perClient || activeGlobal.length >= limit.global)
+    fail('Te veel verzoeken. Probeer het over enkele minuten opnieuw.', 429);
+  const nextGlobal = [...activeGlobal, nowMs];
+  const nextClients = { ...clients, [hashedKey]: [...activeClient, nowMs] };
+  return row('ratelimit', action, { global: nextGlobal, clients: nextClients });
+}
 function fail(message, status = 400) {
   const error = new Error(message);
   error.status = status;
@@ -426,9 +573,12 @@ function recommendConfiguration(body, rows) {
     customerNotes: '',
   };
 }
-function requestContext(body, rows, validated, booking, route) {
+function requestContext(body, rows, validated, booking, route, rateLimitWrite, clientKey, nowMs) {
   return {
     route,
+    rateLimitWrite,
+    clientKey,
+    nowMs,
     status: 201,
     claimKind: 'booking',
     claimRow: row('booking', booking.id, booking, {
@@ -460,22 +610,33 @@ function lostClaim(rowId) {
   };
 }
 /** A retry that finds its own claim still 'claiming' verifies again instead of trusting it. */
-function reverifyRequest(body, rows, existing) {
+function reverifyRequest(body, rows, existing, nowMs = Date.now()) {
   const claim = claimShape(existing);
   if (!validId(existing.rowId))
     fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
   if (!resolveClaim(rows, claim).won) return lostClaim(existing.rowId);
+  const clientKey = resolveClientKey(body);
+  const rateLimitWrite = checkRateLimit(dedupe(rows), 'event-request', clientKey, nowMs);
   // Own and rival claims are excluded: the conflict check already ran when the claim was inserted.
   const catalogueRows = rows.filter((r) => r.kind !== 'booking' && r.kind !== 'block');
   const validated = validateRequest(body, catalogueRows);
-  return requestContext(body, catalogueRows, validated, existing.data, 'gemini');
+  return requestContext(
+    body,
+    catalogueRows,
+    validated,
+    existing.data,
+    'gemini',
+    rateLimitWrite,
+    clientKey,
+    nowMs,
+  );
 }
 /**
  * Second half of the reserve-first protocol. `rows` is a fresh read that includes the claim row and
  * `ownRowId` is the system id returned by our own insert (never rediscovered by recordId, which a
  * double submit can duplicate).
  */
-function settleClaim(context, rows, ownRowId) {
+function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now()) {
   if (!validId(ownRowId)) {
     // Fail closed. Only delete when the row is unambiguous, otherwise we could remove a rival.
     const same = rows.filter((r) => r.recordId === context.claimRow.recordId);
@@ -496,9 +657,25 @@ function settleClaim(context, rows, ownRowId) {
       context.status,
     );
   }
-  return { ...context, route: 'gemini' };
+  let rateLimitWrite;
+  try {
+    rateLimitWrite = checkRateLimit(
+      dedupe(rows),
+      'event-request',
+      context.clientKey || 'anonymous',
+      nowMs,
+    );
+  } catch (error) {
+    return {
+      route: 'lost',
+      status: error.status ?? 429,
+      deleteRowId: Number(ownRowId),
+      response: { error: error.message },
+    };
+  }
+  return { ...context, rateLimitWrite, route: 'gemini' };
 }
-function publicAction(body, allRows) {
+function publicAction(body, allRows, nowMs = Date.now()) {
   const rows = dedupe(allRows);
   if (body.action === 'my-requests') {
     if (!body._identity?.uid) fail('Log eerst in.', 401);
@@ -524,26 +701,41 @@ function publicAction(body, allRows) {
       if (existing.ownerUid !== body._identity.uid) fail('Ongeldige aanvraagreferentie.', 409);
       if (existing.customerToken !== body.customerToken) fail('Ongeldige aanvraagreferentie.', 409);
       if (claimStatusOf(existing.data) === 'claiming' && isActiveBooking(existing.data))
-        return reverifyRequest(body, allRows, existing);
+        return reverifyRequest(body, allRows, existing, nowMs);
       return response({ booking: publicBooking(existing.data) });
     }
+    const clientKey = resolveClientKey(body);
+    const rateLimitWrite = checkRateLimit(rows, 'event-request', clientKey, nowMs);
     const validated = validateRequest(body, rows);
     const booking = { ...buildBooking(body, validated), claimStatus: 'claiming' };
-    return requestContext(body, rows, validated, booking, 'claim');
+    return requestContext(
+      body,
+      rows,
+      validated,
+      booking,
+      'claim',
+      rateLimitWrite,
+      clientKey,
+      nowMs,
+    );
   }
   if (body.action === 'chat') {
+    if (!body._identity?.uid) fail('Log eerst in om de AI-assistent te gebruiken.', 401);
+    const rateLimitWrite = checkRateLimit(rows, 'chat', resolveClientKey(body), nowMs);
     const message = text(body.message, 2000);
     if (!message) fail('Vul een bericht in.');
+    const recommendation = recommendConfiguration(body, rows);
     return {
       route: 'gemini',
       chat: true,
-      config: recommendConfiguration(body, rows),
+      rateLimitWrite,
+      config: recommendation,
       status: 200,
       geminiBody: geminiBody(
         {
           task: 'Beantwoord de vraag uitsluitend met de catalogus. Vraag om ontbrekende datum, groepsgrootte of budget. Verwijs naar de Event Builder om een aanvraag te maken. Gebruik geen opsomming van verzonnen tarieven.',
           message,
-          recommendation: recommendConfiguration(body, rows),
+          recommendation,
           catalogue: catalogue(rows),
         },
         { type: 'object', properties: { reply: { type: 'string' } }, required: ['reply'] },
@@ -818,6 +1010,10 @@ function adminAction(body, allRows) {
 }
 if (typeof module !== 'undefined')
   module.exports = {
+    RATE_LIMITS,
+    checkRateLimit,
+    hashClientKey,
+    sha256,
     parseRows,
     catalogue,
     row,

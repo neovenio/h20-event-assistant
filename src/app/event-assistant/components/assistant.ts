@@ -1,5 +1,6 @@
-import { Component, inject, output, signal } from '@angular/core';
+import { Component, computed, inject, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { AuthService } from '../auth-service';
 import { EventStore } from '../event-store';
 import { EventConfiguration } from '../models';
 import { emptyConfiguration } from '../event-utils';
@@ -34,12 +35,22 @@ import { emptyConfiguration } from '../event-utils';
         <p class="muted">Een moment…</p>
       }
     </div>
+    @if (loginRequired()) {
+      <div class="notice" role="status">
+        <p>Log in met je H20-account om met de live AI-assistent te chatten.</p>
+        <button type="button" class="primary wide" (click)="requestLogin.emit()">
+          Inloggen om te chatten
+        </button>
+      </div>
+    }
     <div class="chips">
       @for (
         chip of ['Een zaal aanbevelen', 'Activiteiten voorstellen', 'Mijn budget bespreken'];
         track chip
       ) {
-        <button type="button" (click)="send(chip)" [disabled]="busy()">{{ chip }}</button>
+        <button type="button" (click)="send(chip)" [disabled]="busy() || loginRequired()">
+          {{ chip }}
+        </button>
       }
     </div>
     <form class="chat-form" (ngSubmit)="send()">
@@ -50,11 +61,12 @@ import { emptyConfiguration } from '../event-utils';
         [(ngModel)]="message"
         placeholder="Bijv. teambuilding voor 30 personen"
         maxlength="2000"
+        [disabled]="loginRequired()"
       /><button
         class="primary"
         type="submit"
         aria-label="Bericht versturen"
-        [disabled]="busy() || !message.trim()"
+        [disabled]="busy() || loginRequired() || !message.trim()"
       >
         ↑
       </button>
@@ -70,8 +82,11 @@ import { emptyConfiguration } from '../event-utils';
   </section>`,
 })
 export class Assistant {
+  readonly auth = inject(AuthService);
   readonly store = inject(EventStore);
   readonly build = output<EventConfiguration | null>();
+  readonly requestLogin = output<void>();
+  readonly loginRequired = computed(() => this.store.live() && !this.auth.user());
   readonly messages = signal([
     {
       sender: 'ai',
@@ -82,6 +97,10 @@ export class Assistant {
   readonly plan = signal<EventConfiguration | null>(null);
   message = '';
   async send(text = this.message): Promise<void> {
+    if (this.loginRequired()) {
+      this.requestLogin.emit();
+      return;
+    }
     if (!text.trim() || this.busy()) return;
     this.message = '';
     this.messages.update((items) => [...items, { sender: 'user', text }]);
