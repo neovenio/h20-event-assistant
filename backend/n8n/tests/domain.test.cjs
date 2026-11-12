@@ -1327,3 +1327,55 @@ test('public workflow allows appointment-slots without auth while keeping book-a
     'verify',
   );
 });
+
+// --- Gemini outage handling -------------------------------------------------------------
+// n8n Cloud's edge replaces 502/504 webhook responses with its own reply (no CORS headers),
+// so the browser only sees "Failed to fetch". Errors must use statuses that pass through.
+test('chat failures answer 503 with a retry hint instead of a swallowed 502', () => {
+  const chat = { chat: true, config: null };
+  const status = (result) => {
+    try {
+      domain.finishGemini(chat, result);
+    } catch (error) {
+      return { status: error.status, message: error.message };
+    }
+    return null;
+  };
+  const busy = status({ error: { message: 'timeout of 20000ms exceeded' } });
+  assert.equal(busy.status, 503);
+  assert.match(busy.message, /niet beschikbaar|druk/i);
+  assert.equal(status({ candidates: [] }).status, 503);
+  const empty = { candidates: [{ content: { parts: [{ text: '{"reply":""}' }] } }] };
+  assert.equal(status(empty).status, 503);
+  const ok = { candidates: [{ content: { parts: [{ text: '{"reply":"Hallo!"}' }] } }] };
+  assert.equal(domain.finishGemini(chat, ok).response.reply, 'Hallo!');
+});
+
+test('no workflow responds with a 502 or 504 status', () => {
+  const dir = path.join(__dirname, '../workflows');
+  for (const file of fs.readdirSync(dir)) {
+    const wf = fs.readFileSync(path.join(dir, file), 'utf8');
+    assert.doesNotMatch(wf, /status\s*(?::|\?\?)\s*50[24]\b/, file);
+    assert.doesNotMatch(wf, /fail\([^)]*,\s*50[24]\)/, file);
+  }
+});
+
+test('Workflow B falls back to a second Gemini model and answers before the client gives up', () => {
+  const wf = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../workflows/B-public-api-and-proposals.json'), 'utf8'),
+  );
+  const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+  const next = (from, index = 0) =>
+    (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
+  const model = (name) => byName[name].parameters.url.match(/models\/([^:]+):/)[1];
+  assert.deepEqual(next('Gemini'), ['Gemini failed']);
+  assert.deepEqual(next('Gemini failed', 0), ['Gemini fallback']);
+  assert.deepEqual(next('Gemini failed', 1), ['Validate AI output']);
+  assert.deepEqual(next('Gemini fallback'), ['Validate AI output']);
+  assert.notEqual(model('Gemini'), model('Gemini fallback'));
+  assert.deepEqual(byName['Gemini fallback'].credentials, byName['Gemini'].credentials);
+  assert.equal(byName['Gemini fallback'].onError, 'continueRegularOutput');
+  // The browser aborts after 60 s; both calls together must finish well before that.
+  const timeouts = ['Gemini', 'Gemini fallback'].map((n) => byName[n].parameters.options.timeout);
+  assert.ok(timeouts.reduce((a, b) => a + b, 0) <= 45000, String(timeouts));
+});

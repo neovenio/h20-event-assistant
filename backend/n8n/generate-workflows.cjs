@@ -7,6 +7,9 @@ const domain = fs
 const scrape = fs
   .readFileSync(path.join(root, 'code/scrape.cjs'), 'utf8')
   .split('if (typeof module')[0];
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_MODEL = 'gemini-3.8-flash';
+const GEMINI_FALLBACK_MODEL = 'gemini-3.5-flash';
 const table = { __rl: true, value: 'REPLACE_WITH_H20_DATA_TABLE_ID', mode: 'id' };
 const settings = {
   executionOrder: 'v1',
@@ -227,28 +230,72 @@ function apiWorkflow(admin) {
         'httpRequest',
         {
           method: 'POST',
-          url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+          url: `${GEMINI_API}/${GEMINI_MODEL}:generateContent`,
           authentication: 'genericCredentialType',
           genericAuthType: 'httpHeaderAuth',
           sendBody: true,
           specifyBody: 'json',
           jsonBody: '={{ $json.geminiBody }}',
-          options: { timeout: 45000 },
+          options: { timeout: 25000 },
         },
         2200,
         -220,
         { onError: 'continueRegularOutput' },
       ),
     );
+    // The primary model can stall or answer 503 under load; retry once on a second model.
+    // Both timeouts together stay well under the browser's 60 s abort.
     nodes.push(
-      code(
-        'Validate AI output',
-        `${domain}\ntry{return [{json:finishGemini($('Route request').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??502,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
+      node(
+        'Gemini failed',
+        'if',
+        {
+          conditions: {
+            options: { caseSensitive: true, leftValue: '', typeValidation: 'loose', version: 2 },
+            conditions: [
+              {
+                id: 'Gemini failed',
+                leftValue: '={{ $json.error !== undefined }}',
+                rightValue: '',
+                operator: { type: 'boolean', operation: 'true', singleValue: true },
+              },
+            ],
+            combinator: 'and',
+          },
+          options: {},
+        },
         2420,
         -220,
       ),
     );
-    nodes.push(code('Result', 'return $input.all();', 2640));
+    nodes.push(
+      node(
+        'Gemini fallback',
+        'httpRequest',
+        {
+          method: 'POST',
+          url: `${GEMINI_API}/${GEMINI_FALLBACK_MODEL}:generateContent`,
+          authentication: 'genericCredentialType',
+          genericAuthType: 'httpHeaderAuth',
+          sendBody: true,
+          specifyBody: 'json',
+          jsonBody: '={{ $("Rate limit recorded").first().json.geminiBody }}',
+          options: { timeout: 20000 },
+        },
+        2640,
+        -320,
+        { onError: 'continueRegularOutput' },
+      ),
+    );
+    nodes.push(
+      code(
+        'Validate AI output',
+        `${domain}\ntry{return [{json:finishGemini($('Route request').first().json,$input.first().json)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'AI niet bereikbaar.'}}}];}`,
+        2860,
+        -220,
+      ),
+    );
+    nodes.push(code('Result', 'return $input.all();', 3080));
     connect(connections, 'Settle claim', 'Needs Gemini');
     connect(connections, 'Needs claim', 'Needs Gemini', 1);
     connect(connections, 'Needs Gemini', 'Rate limit payload');
@@ -258,14 +305,17 @@ function apiWorkflow(admin) {
     connect(connections, 'After rate limit', 'Rate limit recorded');
     connect(connections, 'Rate limit recorded', 'Gemini');
     connect(connections, 'Rate limit recorded', 'Result', 1);
-    connect(connections, 'Gemini', 'Validate AI output');
+    connect(connections, 'Gemini', 'Gemini failed');
+    connect(connections, 'Gemini failed', 'Gemini fallback');
+    connect(connections, 'Gemini failed', 'Validate AI output', 1);
+    connect(connections, 'Gemini fallback', 'Validate AI output');
     connect(connections, 'Validate AI output', 'Result');
   } else {
     nodes.push(code('Result', 'return $input.all();', 1760, 160));
     connect(connections, 'Needs claim', 'Result', 1);
     connect(connections, 'Settle claim', 'Result');
   }
-  const offset = admin ? 1980 : 2860;
+  const offset = admin ? 1980 : 3300;
   nodes.push(check('Needs delete', 'lost', offset - 220, 160));
   nodes.push(
     node(
@@ -622,6 +672,6 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   );
   workflow.nodes.find((n) => n.name === 'Setup').parameters.content = admin
     ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
-    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
+    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential to both Gemini and Gemini fallback, configure Google Cloud Gemini quota/budget caps, then publish.';
   fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
 }
