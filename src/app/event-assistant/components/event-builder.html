@@ -74,7 +74,9 @@
       <div class="card-grid compact">
         @for (room of store.activeRooms(); track room.id) {
           <article class="card" [class.selected]="config.selectedRoomId === room.id">
-            <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+            @if (room.imageUrl) {
+              <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+            }
             <div class="card-body">
               <h4>{{ room.name }}</h4>
               @if (recommendedRoom?.id === room.id) {
@@ -84,7 +86,11 @@
               @if (!room.capacityVerified) {
                 <small class="warning">Capaciteit te bevestigen</small>
               }
-              <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur · indicatief</p>
+              @if (typeof room.baseHourlyRate === 'number') {
+                <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur · indicatief</p>
+              } @else {
+                <p>Tarief op aanvraag</p>
+              }
               <button
                 type="button"
                 [disabled]="!!room.maxCapacity && config.participants > room.maxCapacity"
@@ -104,6 +110,11 @@
               }
             </div>
           </article>
+        } @empty {
+          <p class="notice">
+            Er zijn nog geen zalen gepubliceerd. Plan een rondleiding of intake, of stel je vraag
+            aan de AI-assistent; een medewerker helpt je verder.
+          </p>
         }
       </div>
     }
@@ -153,6 +164,10 @@
               ><small>{{ addon.priceDisplay }}</small></label
             >
           }
+        } @empty {
+          <p class="notice">
+            Er zijn nog geen upgrades gepubliceerd; vraag ernaar bij je aanvraag.
+          </p>
         }
       </div>
     }
@@ -170,6 +185,8 @@
               ><span class="warning">{{ item.priceDisplay }}</span></label
             >
           }
+        } @empty {
+          <p class="notice">Er is nog geen catering gepubliceerd; vraag ernaar bij je aanvraag.</p>
         }
       </div>
     }
@@ -224,7 +241,9 @@
           <dl class="totals">
             <div>
               <dt>Zalen</dt>
-              <dd>{{ price.roomCost | currency: 'EUR' }}</dd>
+              <dd>
+                {{ roomRateUnknown ? 'Op aanvraag' : (price.roomCost | currency: 'EUR') }}
+              </dd>
             </div>
             <div>
               <dt>Activiteiten</dt>
