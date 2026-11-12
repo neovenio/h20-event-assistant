@@ -962,8 +962,14 @@ function finishGemini(context, result) {
     generated = null;
   }
   if (context.chat) {
-    if (!generated) fail('Het AI-antwoord kon niet worden verwerkt. Probeer opnieuw.', 502);
-    if (!text(generated.reply, 6000)) fail('Leeg AI-antwoord.', 502);
+    // 503, never 502/504: n8n Cloud swallows those, so the browser would only see a network error.
+    if (result?.error)
+      fail(
+        'De AI-assistent is nu niet beschikbaar of erg druk. Probeer het over een minuut opnieuw.',
+        503,
+      );
+    if (!generated) fail('Het AI-antwoord kon niet worden verwerkt. Probeer opnieuw.', 503);
+    if (!text(generated.reply, 6000)) fail('Leeg AI-antwoord. Probeer opnieuw.', 503);
     return response({
       reply: text(generated.reply, 6000),
       ...(context.config ? { config: context.config } : {}),
