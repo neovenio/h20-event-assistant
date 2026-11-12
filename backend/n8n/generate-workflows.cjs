@@ -7,6 +7,43 @@ const domain = fs
 const scrape = fs
   .readFileSync(path.join(root, 'code/scrape.cjs'), 'utf8')
   .split('if (typeof module')[0];
+const DEV_ORIGINS =
+  'https://h20-event-assistant-dev.web.app,https://h20-event-assistant-prod.web.app,http://localhost:4200';
+const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+// One small per-environment value table. Dev reads public/h20-runtime.json exactly as before;
+// prod reads config/runtime/prod.json (H20_PROD_RUNTIME_CONFIG overrides the path, for tests).
+const ENVS = {
+  dev: {
+    name: 'dev',
+    outDir: 'workflows',
+    namePrefix: '',
+    webhookPath: 'h20',
+    webhookIdPrefix: 'h20',
+    allowedOrigins: DEV_ORIGINS,
+    frontendOrigin: 'https://h20-event-assistant-dev.web.app',
+    configFile: path.join(root, '../../public/h20-runtime.json'),
+  },
+  prod: {
+    name: 'prod',
+    outDir: 'workflows/prod',
+    namePrefix: '[PROD] ',
+    webhookPath: 'h20-prod',
+    webhookIdPrefix: 'h20-prod',
+    allowedOrigins:
+      'https://h20-event-assistant-prod.web.app,https://h20-event-assistant-prod.firebaseapp.com',
+    frontendOrigin: 'https://h20-event-assistant-prod.web.app',
+    configFile:
+      process.env.H20_PROD_RUNTIME_CONFIG || path.join(root, '../../config/runtime/prod.json'),
+  },
+};
+for (const e of Object.values(ENVS)) e.firebase = readJson(e.configFile).firebase;
+if (!ENVS.prod.firebase?.apiKey) {
+  console.error(
+    `Refusing to generate [PROD] workflows: firebase.apiKey is empty in ${ENVS.prod.configFile}. Populate the prod web config first.`,
+  );
+  process.exit(1);
+}
+let env = ENVS.dev;
 const table = { __rl: true, value: 'REPLACE_WITH_H20_DATA_TABLE_ID', mode: 'id' };
 const settings = {
   executionOrder: 'v1',
@@ -130,10 +167,19 @@ function insertRow(name, x, y = 0) {
   );
 }
 function write(file, name, nodes, connections) {
+  fs.mkdirSync(path.join(root, env.outDir), { recursive: true });
   fs.writeFileSync(
-    path.join(root, 'workflows', file),
+    path.join(root, env.outDir, file),
     JSON.stringify(
-      { name, nodes, connections, settings, active: false, pinData: {}, tags: [] },
+      {
+        name: env.namePrefix + name,
+        nodes,
+        connections,
+        settings,
+        active: false,
+        pinData: {},
+        tags: [],
+      },
       null,
       2,
     ) + '\n',
@@ -152,17 +198,16 @@ function apiWorkflow(admin) {
       'webhook',
       {
         httpMethod: 'POST',
-        path: `h20/${admin ? 'admin' : 'public'}`,
+        path: `${env.webhookPath}/${admin ? 'admin' : 'public'}`,
         authentication: admin ? 'headerAuth' : 'none',
         responseMode: 'responseNode',
         options: {
-          allowedOrigins:
-            'https://h20-event-assistant-dev.web.app,https://h20-event-assistant-prod.web.app,http://localhost:4200',
+          allowedOrigins: env.allowedOrigins,
         },
       },
       0,
       0,
-      { webhookId: `h20-${admin ? 'admin' : 'public'}` },
+      { webhookId: `${env.webhookIdPrefix}-${admin ? 'admin' : 'public'}` },
     ),
   );
   nodes.push(
@@ -354,274 +399,282 @@ function apiWorkflow(admin) {
     connections,
   );
 }
-apiWorkflow(false);
-apiWorkflow(true);
-const sources = [
-  {
-    id: 'h20-event-zaal',
-    label: 'H20 Event Zaal',
-    kind: 'room',
-    url: 'https://eventlocatie.h20.gg/h20-event-zaal/',
-  },
-  {
-    id: 'rabo-esports-stadium',
-    label: 'Rabo Esports Stadium',
-    kind: 'room',
-    url: 'https://eventlocatie.h20.gg/rabo-esports-stadium-eventlocatie/',
-  },
-  {
-    id: 'h20-lounge-cafe',
-    label: 'H20 Lounge Café',
-    kind: 'room',
-    url: 'https://eventlocatie.h20.gg/lounge-cafe/',
-  },
-  { id: 'aula', label: 'Aula', kind: 'room', url: 'https://eventlocatie.h20.gg/aula/' },
-  {
-    id: 'catering',
-    label: 'Catering',
-    kind: 'catering',
-    url: 'https://eventlocatie.h20.gg/catering-eventlocatie/',
-  },
-  {
-    id: 'activities',
-    label: 'Activiteiten',
-    kind: 'activity',
-    url: 'https://h20.gg/activiteiten-bij-h20/',
-  },
-  {
-    id: 'rooms-overview',
-    label: 'Ruimtes',
-    kind: 'information',
-    url: 'https://eventlocatie.h20.gg/ruimtes-eventlocatie/',
-  },
-  {
-    id: 'contact',
-    label: 'Contact',
-    kind: 'information',
-    url: 'https://eventlocatie.h20.gg/contact/',
-  },
-];
-const scrapeNodes = [
-  node(
-    'Setup',
-    'stickyNote',
-    {
-      content:
-        'Set the Data Table ID. Execute manually first. Review staged sources in the employee portal and publish the catalogue items you have checked. Re-scraping only updates source rows, never staff-reviewed catalogue entries. Add official detail-page URLs in Sources as needed. H20 Event Zaal and Rabo Esports Stadium describe the same large venue: publish only one to avoid duplicate capacity.',
-      height: 220,
-      width: 600,
-    },
-    0,
-    -280,
-  ),
-  node('Manual', 'manualTrigger', {}, 0),
-  code('Sources', `return ${JSON.stringify(sources)}.map(json=>({json}));`, 220),
-  node(
-    'Fetch official page',
-    'httpRequest',
-    {
-      url: '={{ $json.url }}',
-      options: {
-        timeout: 20000,
-        response: { response: { responseFormat: 'text', outputPropertyName: 'data' } },
-      },
-    },
-    440,
-  ),
-  node(
-    'Extract HTML',
-    'html',
-    {
-      operation: 'extractHtmlContent',
-      sourceData: 'json',
-      dataPropertyName: 'data',
-      extractionValues: {
-        values: [
-          { key: 'heading', cssSelector: 'h1', returnValue: 'text' },
-          { key: 'title', cssSelector: 'title', returnValue: 'text' },
-          {
-            key: 'content',
-            // eventlocatie.h20.gg has no main/article; its body is the Elementor wp-page block.
-            cssSelector:
-              'main, article, .elementor-location-single, [data-elementor-type="wp-page"]',
-            returnValue: 'text',
-            skipSelectors: 'script, style, nav, footer',
-          },
-          {
-            key: 'image',
-            cssSelector: 'meta[property="og:image"]',
-            returnValue: 'attribute',
-            attribute: 'content',
-          },
-        ],
-      },
-      options: { trimValues: true, cleanUpText: true },
-    },
-    660,
-  ),
-  code(
-    'Normalize sources',
-    `${scrape}\nreturn $input.all().map((item,index)=>({json:normalizeSource($('Sources').all()[index].json,item.json)}));`,
-    880,
-  ),
-  upsert('Stage source', 1100),
-];
-const scrapeConnections = {};
-for (let i = 1; i < scrapeNodes.length - 1; i++)
-  connect(scrapeConnections, scrapeNodes[i].name, scrapeNodes[i + 1].name);
-write(
-  'A-official-website-scraper.json',
-  'H20 A — Official website scraper',
-  scrapeNodes,
-  scrapeConnections,
-);
-
-const FRONTEND_ORIGIN = 'https://h20-event-assistant-dev.web.app';
-const notifications = fs
-  .readFileSync(path.join(root, 'code/notifications.cjs'), 'utf8')
-  .split('if (typeof module')[0];
-const mailNodes = [
-  node(
-    'Setup',
-    'stickyNote',
-    {
-      content:
-        'OPTIONAL — keep inactive until sender, SMTP credential, Data Table ID and FRONTEND_ORIGIN are configured. FRONTEND_ORIGIN in Prepare mail defaults to https://h20-event-assistant-dev.web.app for dev; set FRONTEND_ORIGIN to https://h20-event-assistant-prod.web.app in the [PROD] workflow import. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.',
-      height: 220,
-      width: 650,
-    },
-    0,
-    -250,
-  ),
-  node('Manual', 'manualTrigger', {}, 0),
-  node(
-    'Every five minutes',
-    'scheduleTrigger',
-    { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } },
-    0,
-    180,
-  ),
-  node(
-    'Read records',
-    'dataTable',
-    { resource: 'row', operation: 'get', dataTableId: table, returnAll: true },
-    220,
-    0,
-    { alwaysOutputData: true },
-  ),
-  code(
-    'Prepare mail',
-    `const FRONTEND_ORIGIN = '${FRONTEND_ORIGIN}';\n${notifications}\nreturn notificationJobs($input.all().map(item=>item.json), FRONTEND_ORIGIN).map(json=>({json}));`,
-    440,
-  ),
-  node(
-    'Send email',
-    'emailSend',
-    {
-      fromEmail: 'REPLACE_WITH_VERIFIED_SENDER',
-      toEmail: '={{ $json.to }}',
-      subject: '={{ $json.subject }}',
-      emailFormat: 'text',
-      text: '={{ $json.text }}',
-      options: { appendAttribution: false },
-    },
-    660,
-  ),
-  code(
-    'Delivery receipts',
-    `return $input.all().map((item,index)=>({json:$('Prepare mail').all()[index].json}));`,
-    880,
-  ),
-  upsert('Record delivery', 1100),
-];
-const mailConnections = {};
-connect(mailConnections, 'Manual', 'Read records');
-connect(mailConnections, 'Every five minutes', 'Read records');
-for (let i = 3; i < mailNodes.length - 1; i++)
-  connect(mailConnections, mailNodes[i].name, mailNodes[i + 1].name);
-write(
-  'D-email-notifications.json',
-  'H20 D — Request and approval notifications',
-  mailNodes,
-  mailConnections,
-);
-
-// Replace the prototype shared staff token with Firebase-verified identity before any database access.
-const firebaseSettings = JSON.parse(
-  fs.readFileSync(path.join(root, '../../public/h20-runtime.json'), 'utf8'),
-).firebase;
-for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
-  const pathname = path.join(root, 'workflows', file);
-  const workflow = JSON.parse(fs.readFileSync(pathname, 'utf8'));
-  const admin = file.startsWith('C-');
-  const webhook = workflow.nodes.find((n) => n.name === 'Webhook');
-  webhook.parameters.authentication = 'none';
-  const authSource = fs
-    .readFileSync(path.join(root, 'code/auth-context.cjs'), 'utf8')
-    .split(/if\s*\(typeof module/)[0];
-  workflow.nodes.push(
-    code(
-      'Access',
-      `${authSource}\nconst request=$input.first().json;return [{json:{route:${admin ? 'true' : "!['catalogue','appointment-slots'].includes(request.body?.action)"}?'verify':'public',clientKey:clientKeyFromHeaders(request.headers),body:request.body??{}}}];`,
-      -900,
-      400,
-    ),
-  );
-  workflow.nodes.push(check('Verify required', 'verify', -680, 400));
-  workflow.nodes.push(
-    node(
-      'Verify Firebase token',
-      'httpRequest',
+function generate(selected) {
+  env = selected;
+  const prod = env.name === 'prod';
+  apiWorkflow(false);
+  apiWorkflow(true);
+  if (!prod) {
+    const sources = [
       {
-        method: 'POST',
-        url: `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseSettings.apiKey}`,
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody:
-          '={{ {idToken: ($("Webhook").first().json.headers.authorization || "").replace(/^Bearer /, "")} }}',
-        options: { timeout: 10000 },
+        id: 'h20-event-zaal',
+        label: 'H20 Event Zaal',
+        kind: 'room',
+        url: 'https://eventlocatie.h20.gg/h20-event-zaal/',
       },
-      -440,
-      300,
-      { onError: 'continueRegularOutput' },
+      {
+        id: 'rabo-esports-stadium',
+        label: 'Rabo Esports Stadium',
+        kind: 'room',
+        url: 'https://eventlocatie.h20.gg/rabo-esports-stadium-eventlocatie/',
+      },
+      {
+        id: 'h20-lounge-cafe',
+        label: 'H20 Lounge Café',
+        kind: 'room',
+        url: 'https://eventlocatie.h20.gg/lounge-cafe/',
+      },
+      { id: 'aula', label: 'Aula', kind: 'room', url: 'https://eventlocatie.h20.gg/aula/' },
+      {
+        id: 'catering',
+        label: 'Catering',
+        kind: 'catering',
+        url: 'https://eventlocatie.h20.gg/catering-eventlocatie/',
+      },
+      {
+        id: 'activities',
+        label: 'Activiteiten',
+        kind: 'activity',
+        url: 'https://h20.gg/activiteiten-bij-h20/',
+      },
+      {
+        id: 'rooms-overview',
+        label: 'Ruimtes',
+        kind: 'information',
+        url: 'https://eventlocatie.h20.gg/ruimtes-eventlocatie/',
+      },
+      {
+        id: 'contact',
+        label: 'Contact',
+        kind: 'information',
+        url: 'https://eventlocatie.h20.gg/contact/',
+      },
+    ];
+    const scrapeNodes = [
+      node(
+        'Setup',
+        'stickyNote',
+        {
+          content:
+            'Set the Data Table ID. Execute manually first. Review staged sources in the employee portal and publish the catalogue items you have checked. Re-scraping only updates source rows, never staff-reviewed catalogue entries. Add official detail-page URLs in Sources as needed. H20 Event Zaal and Rabo Esports Stadium describe the same large venue: publish only one to avoid duplicate capacity.',
+          height: 220,
+          width: 600,
+        },
+        0,
+        -280,
+      ),
+      node('Manual', 'manualTrigger', {}, 0),
+      code('Sources', `return ${JSON.stringify(sources)}.map(json=>({json}));`, 220),
+      node(
+        'Fetch official page',
+        'httpRequest',
+        {
+          url: '={{ $json.url }}',
+          options: {
+            timeout: 20000,
+            response: { response: { responseFormat: 'text', outputPropertyName: 'data' } },
+          },
+        },
+        440,
+      ),
+      node(
+        'Extract HTML',
+        'html',
+        {
+          operation: 'extractHtmlContent',
+          sourceData: 'json',
+          dataPropertyName: 'data',
+          extractionValues: {
+            values: [
+              { key: 'heading', cssSelector: 'h1', returnValue: 'text' },
+              { key: 'title', cssSelector: 'title', returnValue: 'text' },
+              {
+                key: 'content',
+                // eventlocatie.h20.gg has no main/article; its body is the Elementor wp-page block.
+                cssSelector:
+                  'main, article, .elementor-location-single, [data-elementor-type="wp-page"]',
+                returnValue: 'text',
+                skipSelectors: 'script, style, nav, footer',
+              },
+              {
+                key: 'image',
+                cssSelector: 'meta[property="og:image"]',
+                returnValue: 'attribute',
+                attribute: 'content',
+              },
+            ],
+          },
+          options: { trimValues: true, cleanUpText: true },
+        },
+        660,
+      ),
+      code(
+        'Normalize sources',
+        `${scrape}\nreturn $input.all().map((item,index)=>({json:normalizeSource($('Sources').all()[index].json,item.json)}));`,
+        880,
+      ),
+      upsert('Stage source', 1100),
+    ];
+    const scrapeConnections = {};
+    for (let i = 1; i < scrapeNodes.length - 1; i++)
+      connect(scrapeConnections, scrapeNodes[i].name, scrapeNodes[i + 1].name);
+    write(
+      'A-official-website-scraper.json',
+      'H20 A — Official website scraper',
+      scrapeNodes,
+      scrapeConnections,
+    );
+  }
+  const FRONTEND_ORIGIN = env.frontendOrigin;
+  const notifications = fs
+    .readFileSync(path.join(root, 'code/notifications.cjs'), 'utf8')
+    .split('if (typeof module')[0];
+  const mailNodes = [
+    node(
+      'Setup',
+      'stickyNote',
+      {
+        content: prod
+          ? 'OPTIONAL — these are the [PROD] files: keep inactive until sender, SMTP credential and the h20_records_prod Data Table are bound. FRONTEND_ORIGIN in Prepare mail is already https://h20-event-assistant-prod.web.app. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.'
+          : 'OPTIONAL — keep inactive until sender, SMTP credential, Data Table ID and FRONTEND_ORIGIN are configured. FRONTEND_ORIGIN in Prepare mail defaults to https://h20-event-assistant-dev.web.app for dev; set FRONTEND_ORIGIN to https://h20-event-assistant-prod.web.app in the [PROD] workflow import. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.',
+        height: 220,
+        width: 650,
+      },
+      0,
+      -250,
     ),
-  );
-  workflow.nodes.push(
+    node('Manual', 'manualTrigger', {}, 0),
+    node(
+      'Every five minutes',
+      'scheduleTrigger',
+      { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } },
+      0,
+      180,
+    ),
+    node(
+      'Read records',
+      'dataTable',
+      { resource: 'row', operation: 'get', dataTableId: table, returnAll: true },
+      220,
+      0,
+      { alwaysOutputData: true },
+    ),
     code(
-      'Verified access',
-      `${authSource}\ntry{const access=$('Access').first().json;const identity=verifiedIdentity($input.first().json,${admin});return [{json:{route:'allowed',body:{...access.body,_identity:identity,_clientKey:access.clientKey}}}];}catch{return [{json:{route:'denied',status:401,response:{error:'Inloggen vereist of onvoldoende rechten.'}}}];}`,
-      -220,
-      300,
+      'Prepare mail',
+      `const FRONTEND_ORIGIN = '${FRONTEND_ORIGIN}';\n${notifications}\nreturn notificationJobs($input.all().map(item=>item.json), FRONTEND_ORIGIN).map(json=>({json}));`,
+      440,
     ),
-  );
-  workflow.nodes.push(
+    node(
+      'Send email',
+      'emailSend',
+      {
+        fromEmail: 'REPLACE_WITH_VERIFIED_SENDER',
+        toEmail: '={{ $json.to }}',
+        subject: '={{ $json.subject }}',
+        emailFormat: 'text',
+        text: '={{ $json.text }}',
+        options: { appendAttribution: false },
+      },
+      660,
+    ),
     code(
-      'Public access',
-      `const access=$('Access').first().json;return [{json:{route:'allowed',body:{...access.body,_identity:null,_clientKey:access.clientKey}}}];`,
-      -440,
-      550,
+      'Delivery receipts',
+      `return $input.all().map((item,index)=>({json:$('Prepare mail').all()[index].json}));`,
+      880,
     ),
+    upsert('Record delivery', 1100),
+  ];
+  const mailConnections = {};
+  connect(mailConnections, 'Manual', 'Read records');
+  connect(mailConnections, 'Every five minutes', 'Read records');
+  for (let i = 3; i < mailNodes.length - 1; i++)
+    connect(mailConnections, mailNodes[i].name, mailNodes[i + 1].name);
+  write(
+    'D-email-notifications.json',
+    'H20 D — Request and approval notifications',
+    mailNodes,
+    mailConnections,
   );
-  workflow.nodes.push(code('Access context', 'return $input.all();', 0, 400));
-  workflow.nodes.push(check('Allowed', 'allowed', 220, 400));
-  workflow.connections.Webhook = { main: [] };
-  connect(workflow.connections, 'Webhook', 'Access');
-  connect(workflow.connections, 'Access', 'Verify required');
-  connect(workflow.connections, 'Verify required', 'Verify Firebase token');
-  connect(workflow.connections, 'Verify required', 'Public access', 1);
-  connect(workflow.connections, 'Verify Firebase token', 'Verified access');
-  connect(workflow.connections, 'Verified access', 'Access context');
-  connect(workflow.connections, 'Public access', 'Access context');
-  connect(workflow.connections, 'Access context', 'Allowed');
-  connect(workflow.connections, 'Allowed', 'Read records');
-  connect(workflow.connections, 'Allowed', 'Respond', 1);
-  const router = workflow.nodes.find((n) => n.name === 'Route request');
-  router.parameters.jsCode = router.parameters.jsCode.replace(
-    "$('Webhook').first().json.body??{}",
-    "$('Access context').first().json.body??{}",
-  );
-  workflow.nodes.find((n) => n.name === 'Setup').parameters.content = admin
-    ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
-    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
-  fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
+
+  // Replace the prototype shared staff token with Firebase-verified identity before any database access.
+  const firebaseSettings = env.firebase;
+  for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
+    const pathname = path.join(root, env.outDir, file);
+    const workflow = JSON.parse(fs.readFileSync(pathname, 'utf8'));
+    const admin = file.startsWith('C-');
+    const webhook = workflow.nodes.find((n) => n.name === 'Webhook');
+    webhook.parameters.authentication = 'none';
+    const authSource = fs
+      .readFileSync(path.join(root, 'code/auth-context.cjs'), 'utf8')
+      .split(/if\s*\(typeof module/)[0];
+    workflow.nodes.push(
+      code(
+        'Access',
+        `${authSource}\nconst request=$input.first().json;return [{json:{route:${admin ? 'true' : "!['catalogue','appointment-slots'].includes(request.body?.action)"}?'verify':'public',clientKey:clientKeyFromHeaders(request.headers),body:request.body??{}}}];`,
+        -900,
+        400,
+      ),
+    );
+    workflow.nodes.push(check('Verify required', 'verify', -680, 400));
+    workflow.nodes.push(
+      node(
+        'Verify Firebase token',
+        'httpRequest',
+        {
+          method: 'POST',
+          url: `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseSettings.apiKey}`,
+          sendBody: true,
+          specifyBody: 'json',
+          jsonBody:
+            '={{ {idToken: ($("Webhook").first().json.headers.authorization || "").replace(/^Bearer /, "")} }}',
+          options: { timeout: 10000 },
+        },
+        -440,
+        300,
+        { onError: 'continueRegularOutput' },
+      ),
+    );
+    workflow.nodes.push(
+      code(
+        'Verified access',
+        `${authSource}\ntry{const access=$('Access').first().json;const identity=verifiedIdentity($input.first().json,${admin});return [{json:{route:'allowed',body:{...access.body,_identity:identity,_clientKey:access.clientKey}}}];}catch{return [{json:{route:'denied',status:401,response:{error:'Inloggen vereist of onvoldoende rechten.'}}}];}`,
+        -220,
+        300,
+      ),
+    );
+    workflow.nodes.push(
+      code(
+        'Public access',
+        `const access=$('Access').first().json;return [{json:{route:'allowed',body:{...access.body,_identity:null,_clientKey:access.clientKey}}}];`,
+        -440,
+        550,
+      ),
+    );
+    workflow.nodes.push(code('Access context', 'return $input.all();', 0, 400));
+    workflow.nodes.push(check('Allowed', 'allowed', 220, 400));
+    workflow.connections.Webhook = { main: [] };
+    connect(workflow.connections, 'Webhook', 'Access');
+    connect(workflow.connections, 'Access', 'Verify required');
+    connect(workflow.connections, 'Verify required', 'Verify Firebase token');
+    connect(workflow.connections, 'Verify required', 'Public access', 1);
+    connect(workflow.connections, 'Verify Firebase token', 'Verified access');
+    connect(workflow.connections, 'Verified access', 'Access context');
+    connect(workflow.connections, 'Public access', 'Access context');
+    connect(workflow.connections, 'Access context', 'Allowed');
+    connect(workflow.connections, 'Allowed', 'Read records');
+    connect(workflow.connections, 'Allowed', 'Respond', 1);
+    const router = workflow.nodes.find((n) => n.name === 'Route request');
+    router.parameters.jsCode = router.parameters.jsCode.replace(
+      "$('Webhook').first().json.body??{}",
+      "$('Access context').first().json.body??{}",
+    );
+    workflow.nodes.find((n) => n.name === 'Setup').parameters.content = prod
+      ? `These are the [PROD] files (webhook ${env.webhookPath}/${admin ? 'admin' : 'public'}, prod Firebase project). Verify Firebase token uses the prod web API key and CORS allows only the prod Hosting origins. Bind every Data Table node to h20_records_prod${admin ? '' : ', attach your Gemini Header Auth credential (x-goog-api-key)'}, then publish.`
+      : admin
+        ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
+        : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
+    fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
+  }
 }
+generate(ENVS.dev);
+generate(ENVS.prod);
