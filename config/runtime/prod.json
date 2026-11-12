@@ -1,11 +1,12 @@
 {
-  "n8nWebhookBaseUrl": "",
+  "n8nWebhookBaseUrl": "https://neovenio.app.n8n.cloud/webhook/h20-prod",
   "firebase": {
     "projectId": "h20-event-assistant-prod",
-    "appId": "",
+    "appId": "1:1094450076512:web:a3d9b24b415ccf5d901c05",
     "storageBucket": "h20-event-assistant-prod.firebasestorage.app",
-    "apiKey": "",
+    "apiKey": "AIzaSyBiwav5_byVQiPQE4g59W-hXCNXqMIB8qA",
     "authDomain": "h20-event-assistant-prod.firebaseapp.com",
-    "messagingSenderId": ""
+    "messagingSenderId": "1094450076512",
+    "projectNumber": "1094450076512"
   }
 }
