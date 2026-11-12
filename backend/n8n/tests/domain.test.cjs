@@ -218,6 +218,46 @@ test('editing an approved proposal sends it back for review', () => {
   assert.equal(result.response.booking.requestStatus, 'pending_review');
   assert.equal(result.response.booking.reservation.adminApprovalStatus, 'Pending');
 });
+test('a staff review cannot reopen a cancelled or refunded request', () => {
+  for (const status of ['Cancelled', 'Refunded']) {
+    const s = savedRequest();
+    const closed = s.rows.map((item) =>
+      item.kind === 'booking'
+        ? {
+            ...item,
+            data: {
+              ...item.data,
+              requestStatus: 'rejected',
+              reservation: { ...item.data.reservation, bookingStatus: status },
+            },
+          }
+        : item,
+    );
+    assert.throws(
+      () =>
+        domain.adminAction(
+          { action: 'review', id: s.body.requestId, explanation: 'Heropend' },
+          closed,
+        ),
+      (err) => err.status === 409 && /afgesloten/.test(err.message),
+    );
+  }
+});
+test('a block on a non-existent calendar date is rejected', () => {
+  for (const date of ['2099-02-31', '2099-13-01', '2099-04-31']) {
+    assert.throws(
+      () =>
+        domain.adminAction(
+          {
+            action: 'add-block',
+            block: { roomId: room.id, date, startTime: '10:00', endTime: '11:00', reason: 'X' },
+          },
+          rows(),
+        ),
+      /Ongeldige blokkade/,
+    );
+  }
+});
 test('website extraction stages data without publishing invented prices or capacity', () => {
   const result = normalizeSource(
     { id: 'test', kind: 'room', url: 'https://eventlocatie.h20.gg/test/', label: 'Test' },
@@ -847,6 +887,54 @@ test('global rate limit across distinct clients returns 429 when hourly cap is r
   );
 });
 
+test('a signed-in user cannot escape the per-client limit by rotating a spoofed forwarded IP', () => {
+  const t0 = 1_700_000_000_000;
+  let state = rows();
+  for (let i = 0; i < domain.RATE_LIMITS.chat.perClient; i++) {
+    const out = domain.publicAction(
+      {
+        action: 'chat',
+        _identity: { uid: 'rotating-user' },
+        _clientKey: `198.18.0.${i}`,
+        message: `Vraag ${i}`,
+      },
+      state,
+      t0 + i,
+    );
+    state = upsertParsed(state, out.rateLimitWrite);
+  }
+  assert.throws(
+    () =>
+      domain.publicAction(
+        {
+          action: 'chat',
+          _identity: { uid: 'rotating-user' },
+          _clientKey: '198.18.1.1',
+          message: 'Nieuw IP',
+        },
+        state,
+        t0 + 5000,
+      ),
+    (err) => err.status === 429,
+  );
+
+  let reqState = rows();
+  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
+    const body = request();
+    body._clientKey = `198.18.2.${i}`;
+    body.config.date = `2099-12-${String(10 + i).padStart(2, '0')}`;
+    const out = domain.publicAction(body, reqState, t0);
+    reqState = upsertParsed(reqState, out.rateLimitWrite);
+  }
+  const rotated = request();
+  rotated._clientKey = '198.18.3.1';
+  rotated.config.date = '2099-12-25';
+  assert.throws(
+    () => domain.publicAction(rotated, reqState, t0 + 10_000),
+    (err) => err.status === 429,
+  );
+});
+
 test('idempotent retry of an existing held event-request returns 200 even when rate limit is full', () => {
   const t0 = 1_700_000_000_000;
   const saved = savedRequest();
@@ -895,8 +983,10 @@ test('raw caller IP is SHA-256 hashed, never stored in plain text, and ratelimit
   );
   assert.ok(!out.rateLimitWrite.payload.includes(rawIp));
   const keys = Object.keys(JSON.parse(out.rateLimitWrite.payload).data.clients);
-  assert.equal(keys.length, 1);
-  assert.match(keys[0], /^sha256:[0-9a-f]{64}$/);
+  // One key for the Firebase uid, one for the caller IP; both hashed.
+  assert.equal(keys.length, 2);
+  for (const key of keys) assert.match(key, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(!out.rateLimitWrite.payload.includes('privacy-user'));
 
   const stateWithRateLimit = upsertParsed(rows(), out.rateLimitWrite);
   const snap = domain.adminAction({ action: 'snapshot' }, stateWithRateLimit).response;

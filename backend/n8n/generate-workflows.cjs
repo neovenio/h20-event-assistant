@@ -622,6 +622,6 @@ for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
   );
   workflow.nodes.find((n) => n.name === 'Setup').parameters.content = admin
     ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
-    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-IP (SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
+    : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential, configure Google Cloud Gemini quota/budget caps, then publish.';
   fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
 }
