@@ -169,6 +169,24 @@ function insertRow(name, x, y = 0) {
     { onError: 'continueRegularOutput' },
   );
 }
+/** Deletes one Data Table row per input item, by system id (`{ id }`). */
+function deleteById(name, x, y = 0, extra = {}) {
+  return node(
+    name,
+    'dataTable',
+    {
+      resource: 'row',
+      operation: 'deleteRows',
+      dataTableId: table,
+      matchType: 'allConditions',
+      filters: { conditions: [{ keyName: 'id', condition: 'eq', keyValue: '={{ $json.id }}' }] },
+    },
+    x,
+    y,
+    // deleteRows outputs nothing when no row matches; the webhook must still be answered.
+    { alwaysOutputData: true, ...extra },
+  );
+}
 function write(file, name, nodes, connections) {
   fs.mkdirSync(path.join(root, env.outDir), { recursive: true });
   fs.writeFileSync(
@@ -224,12 +242,20 @@ function apiWorkflow(admin) {
     ),
   );
   // Reserve first, verify after: insert the claim row, re-read everything, lowest Data Table row id wins.
-  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');if($('Insert claim').all().some(item=>item.json.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);return [{json:settleClaim($('Route request').first().json,parseRows(items),$('Insert claim').first().json.id)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
+  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const inserts=$('Insert claim').all().map(item=>item.json);if(inserts.some(item=>item.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);const context=$('Route request').first().json;const idOf=(recordId)=>inserts.find(item=>item.recordId===recordId)?.id;return [{json:settleClaim(context,parseRows(items),idOf(context.claimRow.recordId),context.hitRow?idOf(context.hitRow.recordId):undefined)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
+  // Hit-only requests (chat, claiming retry): decide on our own hit after the re-read, before Gemini.
+  const decide = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const inserts=$('Insert hit').all().map(item=>item.json);if(inserts.some(item=>item.error))fail('De database is niet beschikbaar.',503);return [{json:decideHit($('Route request').first().json,parseRows(items),inserts[0]?.id)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   const routing = `${domain}\ntry { const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const body=$('Webhook').first().json.body??{};if(JSON.stringify(body).length>25000)fail('Verzoek is te groot.',413);return [{json:${admin ? 'adminAction' : 'publicAction'}(body,parseRows(items))}]; }catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   nodes.push(code('Route request', routing, 440));
   nodes.push(check('Needs claim', 'claim', 660, 160));
+  // One insert writes both rows (one per item): the claim and, for event requests, its rate hit.
   nodes.push(
-    code('Write claim', 'return [{json:$("Route request").first().json.claimRow}];', 880, 160),
+    code(
+      'Write claim',
+      'const context=$("Route request").first().json;return [{json:context.claimRow}].concat(context.hitRow?[{json:context.hitRow}]:[]);',
+      880,
+      160,
+    ),
   );
   nodes.push(insertRow('Insert claim', 1100, 160));
   nodes.push(
@@ -250,25 +276,33 @@ function apiWorkflow(admin) {
   connect(connections, 'Re-read records after claim', 'Settle claim');
   if (!admin) {
     nodes.push(check('Needs Gemini', 'gemini', 1100, -140));
+    // Chat and a `claiming` retry insert only a rate hit: hit -> insert -> re-read -> decide.
+    nodes.push(check('Needs hit', 'hit', 660, 360));
     nodes.push(
-      code(
-        'Rate limit payload',
-        'return [{json:$("Needs Gemini").first().json.rateLimitWrite}];',
+      code('Write hit', 'return [{json:$("Route request").first().json.hitRow}];', 880, 360),
+    );
+    nodes.push(insertRow('Insert hit', 1100, 360));
+    nodes.push(
+      node(
+        'Re-read records after hit',
+        'dataTable',
+        { resource: 'row', operation: 'get', dataTableId: table, returnAll: true },
         1320,
-        -220,
+        360,
+        { alwaysOutputData: true, onError: 'continueRegularOutput' },
       ),
     );
-    nodes.push(upsert('Record rate limit', 1540, -220));
-    nodes[nodes.length - 1].onError = 'continueRegularOutput';
+    nodes.push(code('Decide hit', decide, 1540, 360));
+    // Best-effort prune of expired hits: one item per id, errors ignored, a dead-end branch.
     nodes.push(
       code(
-        'After rate limit',
-        `const saved=$input.all();if(saved.some(item=>item.json.error))return [{json:{route:'respond',status:503,response:{error:'De database is niet beschikbaar.'}}}];return [{json:$('Needs Gemini').first().json}];`,
-        1760,
-        -220,
+        'Prune payload',
+        'return ($input.first().json.pruneRowIds??[]).map(id=>({json:{id}}));',
+        1320,
+        -300,
       ),
     );
-    nodes.push(check('Rate limit recorded', 'gemini', 1980, -220));
+    nodes.push(deleteById('Prune expired hits', 1540, -300, { onError: 'continueRegularOutput' }));
     nodes.push(
       node(
         'Gemini',
@@ -324,7 +358,7 @@ function apiWorkflow(admin) {
           genericAuthType: 'httpHeaderAuth',
           sendBody: true,
           specifyBody: 'json',
-          jsonBody: '={{ $("Rate limit recorded").first().json.geminiBody }}',
+          jsonBody: '={{ $("Needs Gemini").first().json.geminiBody }}',
           options: { timeout: 20000 },
         },
         2640,
@@ -342,14 +376,18 @@ function apiWorkflow(admin) {
     );
     nodes.push(code('Result', 'return $input.all();', 3080));
     connect(connections, 'Settle claim', 'Needs Gemini');
-    connect(connections, 'Needs claim', 'Needs Gemini', 1);
-    connect(connections, 'Needs Gemini', 'Rate limit payload');
+    connect(connections, 'Needs claim', 'Needs hit', 1);
+    connect(connections, 'Needs hit', 'Write hit');
+    connect(connections, 'Needs hit', 'Result', 1);
+    connect(connections, 'Write hit', 'Insert hit');
+    connect(connections, 'Insert hit', 'Re-read records after hit');
+    connect(connections, 'Re-read records after hit', 'Decide hit');
+    connect(connections, 'Decide hit', 'Needs Gemini');
+    // Prune first (best effort, never blocks), then Gemini; a denied request answers instead.
+    connect(connections, 'Needs Gemini', 'Prune payload');
+    connect(connections, 'Needs Gemini', 'Gemini');
     connect(connections, 'Needs Gemini', 'Result', 1);
-    connect(connections, 'Rate limit payload', 'Record rate limit');
-    connect(connections, 'Record rate limit', 'After rate limit');
-    connect(connections, 'After rate limit', 'Rate limit recorded');
-    connect(connections, 'Rate limit recorded', 'Gemini');
-    connect(connections, 'Rate limit recorded', 'Result', 1);
+    connect(connections, 'Prune payload', 'Prune expired hits');
     connect(connections, 'Gemini', 'Gemini failed');
     connect(connections, 'Gemini failed', 'Gemini fallback');
     connect(connections, 'Gemini failed', 'Validate AI output', 1);
@@ -362,32 +400,19 @@ function apiWorkflow(admin) {
   }
   const offset = admin ? 1980 : 3300;
   nodes.push(check('Needs delete', 'lost', offset - 220, 160));
+  // One item per row id (our claim, our hit, expired hits). Never empty, so the webhook is always
+  // answered: the sentinel id 0 matches no row.
   nodes.push(
-    node(
-      'Delete lost claim',
-      'dataTable',
-      {
-        resource: 'row',
-        operation: 'deleteRows',
-        dataTableId: table,
-        matchType: 'allConditions',
-        filters: {
-          conditions: [
-            {
-              keyName: 'id',
-              condition: 'eq',
-              keyValue: '={{ $("Result").first().json.deleteRowId }}',
-            },
-          ],
-        },
-      },
-      offset,
+    code(
+      'Lost claim ids',
+      'const ids=$("Result").first().json.deleteRowIds??[];return (ids.length?ids:[0]).map(id=>({json:{id}}));',
+      offset - 110,
       260,
-      // deleteRows outputs nothing when no row matches; the webhook must still be answered.
-      { onError: 'continueRegularOutput', alwaysOutputData: true },
     ),
   );
-  // A failed delete still answers 409: the leftover claiming row errs on the cautious side.
+  nodes.push(deleteById('Delete lost claim', offset, 260, { onError: 'continueRegularOutput' }));
+  // A failed delete still answers 409/429: a leftover row only errs on the cautious side. The
+  // node runs once for all delete outputs, so the webhook is answered exactly once.
   nodes.push(
     code(
       'After lost claim',
@@ -433,7 +458,8 @@ function apiWorkflow(admin) {
   connect(connections, 'Webhook', 'Read records');
   connect(connections, 'Read records', 'Route request');
   connect(connections, 'Result', 'Needs delete');
-  connect(connections, 'Needs delete', 'Delete lost claim');
+  connect(connections, 'Needs delete', 'Lost claim ids');
+  connect(connections, 'Lost claim ids', 'Delete lost claim');
   connect(connections, 'Needs delete', 'Needs save', 1);
   connect(connections, 'Delete lost claim', 'After lost claim');
   connect(connections, 'After lost claim', 'Respond');
@@ -719,10 +745,10 @@ function generate(selected) {
       "$('Access context').first().json.body??{}",
     );
     workflow.nodes.find((n) => n.name === 'Setup').parameters.content = prod
-      ? `These are the [PROD] files (webhook ${env.webhookPath}/${admin ? 'admin' : 'public'}, prod Firebase project). Verify Firebase token uses the prod web API key and CORS allows only the prod Hosting origins. Bind every Data Table node to h20_records_prod${admin ? '' : ', attach your Gemini Header Auth credential (x-goog-api-key) to both Gemini and Gemini fallback'}, then publish.`
+      ? `These are the [PROD] files (webhook ${env.webhookPath}/${admin ? 'admin' : 'public'}, prod Firebase project). Verify Firebase token uses the prod web API key and CORS allows only the prod Hosting origins. Bind every Data Table node to h20_records_prod${admin ? '' : ' (including Insert hit, Re-read records after hit and Prune expired hits)'}${admin ? '' : ', attach your Gemini Header Auth credential (x-goog-api-key) to both Gemini and Gemini fallback'}, then publish.`
       : admin
         ? 'Firebase ID tokens are verified through accounts:lookup for this Firebase project before protected data access. Staff must have the server-managed custom claim staff:true. Select your Data Table credential, then publish. No shared staff password is used.'
-        : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits in the Data Table before calling Gemini. Select your Data Table in Read records, Insert claim, Re-read records after claim, Delete lost claim, Record rate limit and Save record, attach your Gemini credential to both Gemini and Gemini fallback, configure Google Cloud Gemini quota/budget caps, then publish.';
+        : 'Firebase ID tokens are verified through accounts:lookup for all actions except public catalogue reads. AI actions (chat, event-request) enforce per-account and per-IP (both SHA-256 hashed) and global hourly rate limits before calling Gemini: each request first inserts a rate-hit row, re-reads the Data Table and is allowed only if fewer than the limit of earlier hits (lowest row id first) exist. Select your Data Table in Read records, Insert claim, Re-read records after claim, Insert hit, Re-read records after hit, Delete lost claim, Prune expired hits and Save record, attach your Gemini credential to both Gemini and Gemini fallback, configure Google Cloud Gemini quota/budget caps, then publish.';
     fs.writeFileSync(pathname, JSON.stringify(workflow, null, 2) + '\n');
   }
 }
