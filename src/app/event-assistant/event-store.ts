@@ -273,6 +273,11 @@ export class EventStore {
   logout(): void {
     this.api.logout();
     if (this.live()) {
+      // Receipts and retry ids belong to the signed-out account; never reuse them for the next one.
+      this.receipts = {};
+      this.pendingRequest = null;
+      this.pendingAppointment = null;
+      this.ownBookingIds.set([]);
       this.bookings.set([]);
       this.blocks.set([]);
       this.logs.set([]);

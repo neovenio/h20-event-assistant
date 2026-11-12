@@ -36,7 +36,7 @@ export interface InternalNote {
 }
 
 export interface Booking {
-  requestStatus?: 'pending_review' | 'approved' | 'rejected';
+  requestStatus?: 'pending_review' | 'approved' | 'rejected' | 'cancelled';
   explanation?: string;
   planning?: {
     startTime: string;

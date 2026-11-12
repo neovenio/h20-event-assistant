@@ -1097,9 +1097,13 @@ function adminAction(body, allRows) {
         b.reservation.adminApprovalStatus = 'Approved';
         b.reservation.bookingStatus = 'Awaiting Payment';
         // Approval publishes a concept to the customer; it does not guarantee live availability or collect money.
-      } else {
+      } else if (body.actionType === 'reject') {
         b.requestStatus = 'rejected';
         b.reservation.adminApprovalStatus = 'Rejected';
+        b.reservation.bookingStatus = 'Cancelled';
+      } else {
+        // Cancelling is not a rejection: keep the approval decision and mark it cancelled.
+        b.requestStatus = 'cancelled';
         b.reservation.bookingStatus = 'Cancelled';
       }
       action = body.actionType;
