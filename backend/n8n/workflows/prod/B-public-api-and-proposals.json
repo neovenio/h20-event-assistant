@@ -319,7 +319,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ $json.geminiBody }}",
         "options": {
-          "timeout": 25000
+          "timeout": 15000
         }
       },
       "id": "gemini",
@@ -370,7 +370,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ $(\"Rate limit recorded\").first().json.geminiBody }}",
         "options": {
-          "timeout": 20000
+          "timeout": 35000
         }
       },
       "id": "gemini-fallback",

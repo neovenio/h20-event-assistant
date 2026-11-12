@@ -1462,7 +1462,12 @@ for (const dir of ['workflows', 'workflows/prod'])
     assert.notEqual(model('Gemini'), model('Gemini fallback'));
     assert.deepEqual(byName['Gemini fallback'].credentials, byName['Gemini'].credentials);
     assert.equal(byName['Gemini fallback'].onError, 'continueRegularOutput');
-    // The browser aborts after 60 s; both calls together must finish well before that.
-    const timeouts = ['Gemini', 'Gemini fallback'].map((n) => byName[n].parameters.options.timeout);
-    assert.ok(timeouts.reduce((a, b) => a + b, 0) <= 45000, String(timeouts));
+    // The browser aborts after 60 s; both calls together must finish before that, with room for
+    // token verification and Data Table reads. The overloaded primary usually fails fast, so most
+    // of the budget goes to the fallback (a full proposal took up to ~20 s on gemini-3.5-flash).
+    const [primary, fallback] = ['Gemini', 'Gemini fallback'].map(
+      (n) => byName[n].parameters.options.timeout,
+    );
+    assert.ok(primary + fallback <= 50000, `${primary}+${fallback}`);
+    assert.ok(fallback >= 30000, `fallback ${fallback}`);
   });
