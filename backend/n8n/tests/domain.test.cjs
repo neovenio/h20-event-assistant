@@ -492,12 +492,21 @@ const claimBlock = (change = {}) =>
     },
     snapshot(),
   );
-const outcome = (context, rows, id) =>
-  domain.settleClaim(
+/** Settles a claim; a booking context's own hit is looked up in `rows` (or added when absent). */
+const outcome = (context, rowList, id, hitId) => {
+  let list = rowList;
+  let ownHit = hitId ?? list.find((r) => r.recordId === context.hitRow?.recordId)?.rowId;
+  if (context.hitRow && ownHit === undefined) {
+    ownHit = 9000;
+    list = [...list, ...domain.parseRows([inserted(context.hitRow, ownHit)])];
+  }
+  return domain.settleClaim(
     context,
-    rows,
-    id ?? rows.find((r) => r.recordId === context.claimRow.recordId)?.rowId,
+    list,
+    id ?? list.find((r) => r.recordId === context.claimRow.recordId)?.rowId,
+    ownHit,
   );
+};
 
 test('a new request claims the slot first, as claiming, before any AI call', () => {
   const { context } = claimRequest();
@@ -531,7 +540,7 @@ test('two overlapping requests: exactly one wins (lowest row id), whatever the e
     const lost = results.find((r) => r.route === 'lost');
     assert.equal(lost.status, 409);
     assert.match(lost.response.error, /overlapt/);
-    assert.equal(lost.deleteRowId, 12);
+    assert.deepEqual(lost.deleteRowIds, [12, 9000]);
   }
 });
 
@@ -658,7 +667,7 @@ test('retry with a claiming row re-verifies: it wins and proceeds, or loses, del
     mine.body,
     snapshot(claiming, inserted(rival.context.claimRow, 21)),
   );
-  assert.equal(won.route, 'gemini');
+  assert.equal(won.route, 'hit');
   assert.equal(won.booking.id, mine.body.requestId);
   assert.ok(won.geminiBody);
   // loses: rival has the lower id
@@ -668,7 +677,7 @@ test('retry with a claiming row re-verifies: it wins and proceeds, or loses, del
   );
   assert.equal(lost.route, 'lost');
   assert.equal(lost.status, 409);
-  assert.equal(lost.deleteRowId, 20);
+  assert.deepEqual(lost.deleteRowIds, [20]);
 });
 
 test('retry that finds a held row returns the receipt as before', () => {
@@ -725,38 +734,6 @@ test('resolveClaim is pure and deterministic', () => {
   assert.deepEqual(domain.resolveClaim(rowsBoth, claim(4)), { won: false, winnerId: 3 });
 });
 
-test('B and C workflows wire claim insert, re-read, settle and delete-on-loss', () => {
-  const load = (file) =>
-    JSON.parse(fs.readFileSync(path.join(__dirname, '../workflows', file), 'utf8'));
-  for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
-    const wf = load(file);
-    const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
-    const next = (from, index = 0) =>
-      (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
-    assert.equal(byName['Insert claim'].parameters.operation, 'insert');
-    assert.equal(byName['Re-read records after claim'].parameters.operation, 'get');
-    assert.equal(byName['Delete lost claim'].parameters.operation, 'deleteRows');
-    assert.equal(byName['Delete lost claim'].alwaysOutputData, true);
-    assert.equal(byName['Delete lost claim'].parameters.filters.conditions[0].keyName, 'id');
-    assert.match(
-      byName['Settle claim'].parameters.jsCode,
-      /\$\('Insert claim'\)\.first\(\)\.json\.id/,
-    );
-    assert.match(byName['Settle claim'].parameters.jsCode, /settleClaim/);
-    assert.deepEqual(next('Route request'), ['Needs claim']);
-    assert.deepEqual(next('Needs claim', 0), ['Write claim']);
-    assert.deepEqual(next('Write claim'), ['Insert claim']);
-    assert.deepEqual(next('Insert claim'), ['Re-read records after claim']);
-    assert.deepEqual(next('Re-read records after claim'), ['Settle claim']);
-    assert.deepEqual(next('Settle claim'), [file.startsWith('B-') ? 'Needs Gemini' : 'Result']);
-    assert.deepEqual(next('Result'), ['Needs delete']);
-    assert.deepEqual(next('Needs delete', 0), ['Delete lost claim']);
-    assert.deepEqual(next('Needs delete', 1), ['Needs save']);
-    assert.deepEqual(next('Delete lost claim'), ['After lost claim']);
-    assert.deepEqual(next('After lost claim'), ['Respond']);
-  }
-});
-
 test('a claim without a system id fails closed and never wins', () => {
   const a = claimRequest();
   const b = claimRequest();
@@ -795,10 +772,10 @@ test('a same-requestId double submit: one winner, the loser deletes only its own
   const loser = outcome(context, rowsBoth, 32);
   assert.equal(winner.route, 'gemini');
   assert.equal(loser.route, 'lost');
-  assert.equal(loser.deleteRowId, 32);
+  assert.deepEqual(loser.deleteRowIds, [32, 9000]);
   // while both rows exist, a retry sees the lowest id and staff see one booking
   const retry = domain.publicAction(body, rowsBoth);
-  assert.equal(retry.route, 'gemini');
+  assert.equal(retry.route, 'hit');
   assert.equal(domain.adminAction({ action: 'snapshot' }, rowsBoth).response.bookings.length, 1);
   // after the loser deleted itself and the winner saved, the retry returns the receipt
   const saved = domain.finishGemini(winner, generated(winner));
@@ -834,11 +811,30 @@ test('staff cannot approve a booking that is still claiming', () => {
   );
 });
 
-// --- Webhook abuse protection & rate limits (#10) ----------------------------------------
-const upsertParsed = (parsedRows, writeRow) => [
-  ...parsedRows.filter((item) => item.recordId !== writeRow.recordId),
-  ...domain.parseRows([writeRow]),
-];
+// --- Webhook abuse protection & rate limits (#10, insert-first rate hits #46) --------------
+const T0 = 1_700_000_000_000;
+const keyOf = (name) => domain.hashClientKey(`uid:${name}`);
+const hitAt = (action, keys, at, id, rowId) => {
+  const written = domain.buildRateHit(action, keys, at, id);
+  return rowId === undefined ? written : inserted(written, rowId);
+};
+const hitRows = (...raw) => domain.parseRows([...baseRaw(), ...raw]);
+const shuffled = (list, seed) => {
+  const copy = [...list];
+  let state = seed;
+  for (let i = copy.length - 1; i > 0; i--) {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    const j = state % (i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+};
+const chatBody = (uid, ip, message = 'Hallo') => ({
+  action: 'chat',
+  _identity: { uid },
+  _clientKey: ip,
+  message,
+});
 
 test('chat without Firebase _identity.uid rejects with 401', () => {
   for (const body of [
@@ -853,263 +849,592 @@ test('chat without Firebase _identity.uid rejects with 401', () => {
   }
 });
 
-test('per-client rate limit on chat and event-request returns 429 on (limit + 1)th request and resets after 1 hour', () => {
-  const t0 = 1_700_000_000_000;
-  let state = rows();
-  for (let i = 0; i < domain.RATE_LIMITS.chat.perClient; i++) {
-    const out = domain.publicAction(
-      {
-        action: 'chat',
-        _identity: { uid: 'chat-user' },
-        _clientKey: '203.0.113.10',
-        message: `Vraag ${i}`,
-      },
-      state,
-      t0 + i * 1000,
-    );
-    assert.equal(out.route, 'gemini');
-    state = upsertParsed(state, out.rateLimitWrite);
-  }
-  assert.throws(
-    () =>
-      domain.publicAction(
-        {
-          action: 'chat',
-          _identity: { uid: 'chat-user' },
-          _clientKey: '203.0.113.10',
-          message: 'Te veel',
-        },
-        state,
-        t0 + 30_000,
-      ),
-    (err) => err.status === 429 && /Te veel verzoeken/.test(err.message),
-  );
-  // Succeeds again 1 hour after the earliest timestamp (frees 1 slot) and prunes all after full window
-  const afterFirstExpiry = domain.publicAction(
-    {
-      action: 'chat',
-      _identity: { uid: 'chat-user' },
-      _clientKey: '203.0.113.10',
-      message: 'Weer welkom',
-    },
-    state,
-    t0 + 3600_001,
-  );
-  assert.equal(afterFirstExpiry.route, 'gemini');
-  assert.equal(JSON.parse(afterFirstExpiry.rateLimitWrite.payload).data.global.length, 20);
-  const afterFullWindow = domain.publicAction(
-    {
-      action: 'chat',
-      _identity: { uid: 'chat-user' },
-      _clientKey: '203.0.113.10',
-      message: 'Schoon venster',
-    },
-    state,
-    t0 + 19_000 + 3600_001,
-  );
-  assert.equal(afterFullWindow.route, 'gemini');
-  assert.equal(JSON.parse(afterFullWindow.rateLimitWrite.payload).data.global.length, 1);
-
-  // event-request per-client limit (5/hour)
-  let reqState = rows();
-  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
-    const body = request();
-    body._clientKey = '203.0.113.20';
-    body.config.date = `2099-12-${String(10 + i).padStart(2, '0')}`;
-    const out = domain.publicAction(body, reqState, t0);
-    assert.equal(out.route, 'claim');
-    reqState = upsertParsed(reqState, out.rateLimitWrite);
-  }
-  const overReq = request();
-  overReq._clientKey = '203.0.113.20';
-  overReq.config.date = '2099-12-25';
-  assert.throws(
-    () => domain.publicAction(overReq, reqState, t0 + 10_000),
-    (err) => err.status === 429 && /Te veel verzoeken/.test(err.message),
-  );
-  const afterReqWindow = domain.publicAction(overReq, reqState, t0 + 3600_001);
-  assert.equal(afterReqWindow.route, 'claim');
-  assert.equal(JSON.parse(afterReqWindow.rateLimitWrite.payload).data.global.length, 1);
+test('buildRateHit stores hashed keys only, under a unique recordId, with the id given', () => {
+  const written = domain.buildRateHit('chat', [keyOf('a'), 'raw-key', keyOf('a')], T0, 'abc123');
+  assert.equal(written.kind, 'ratehit');
+  assert.equal(written.recordId, 'ratehit:chat:abc123');
+  const data = JSON.parse(written.payload).data;
+  assert.equal(data.action, 'chat');
+  assert.equal(data.at, T0);
+  assert.equal(data.keys.length, 2);
+  for (const key of data.keys) assert.match(key, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(!written.payload.includes('raw-key'));
 });
 
-test('global rate limit across distinct clients returns 429 when hourly cap is reached', () => {
-  const t0 = 1_700_000_000_000;
-  let chatState = rows();
-  for (let i = 0; i < domain.RATE_LIMITS.chat.global; i++) {
-    const out = domain.publicAction(
-      {
-        action: 'chat',
-        _identity: { uid: `user-${i}` },
-        _clientKey: `198.51.100.${i}`,
-        message: 'Hallo',
-      },
-      chatState,
-      t0 + i,
-    );
-    chatState = upsertParsed(chatState, out.rateLimitWrite);
-  }
-  assert.throws(
-    () =>
-      domain.publicAction(
-        {
-          action: 'chat',
-          _identity: { uid: 'fresh-user' },
-          _clientKey: '192.0.2.99',
-          message: 'Nog een vraag',
-        },
-        chatState,
-        t0 + 5000,
-      ),
-    (err) => err.status === 429,
-  );
+test('legacy ratelimit rows are ignored: they neither count nor get pruned', () => {
+  const legacy = domain.row('ratelimit', 'chat', {
+    global: Array.from({ length: 500 }, (_, i) => T0 + i),
+    clients: { [keyOf('a')]: Array.from({ length: 500 }, (_, i) => T0 + i) },
+  });
+  const own = hitAt('chat', [keyOf('a')], T0 + 1000, 'own', 1);
+  const decision = domain.decideRateHit(hitRows(inserted(legacy, 0), own), 'chat', 1, T0 + 1000);
+  assert.deepEqual(decision, { allowed: true, deleteRowIds: [] });
+});
 
-  let reqState = rows();
-  for (let i = 0; i < domain.RATE_LIMITS['event-request'].global; i++) {
-    const body = request();
-    body._identity = { uid: `req-user-${i}`, email: `u${i}@example.test` };
-    body._clientKey = `198.51.101.${i}`;
-    const month = String(Math.floor(i / 25) + 1).padStart(2, '0');
-    const day = String((i % 25) + 1).padStart(2, '0');
-    body.config.date = `2099-${month}-${day}`;
-    const out = domain.publicAction(body, reqState, t0 + i);
-    reqState = upsertParsed(reqState, out.rateLimitWrite);
+test('per-client limit: N concurrent hits with distinct ids allow exactly perClient, in any order', () => {
+  for (const action of ['chat', 'event-request']) {
+    const { perClient } = domain.RATE_LIMITS[action];
+    const total = perClient + 7;
+    const hits = Array.from({ length: total }, (_, i) =>
+      hitAt(action, [keyOf('same'), domain.hashClientKey(`10.0.0.${i}`)], T0 + i, `r${i}`, 100 + i),
+    );
+    const reread = hitRows(...hits);
+    for (const seed of [1, 2, 3, 4]) {
+      const allowed = shuffled(hits, seed)
+        .filter((hit) => domain.decideRateHit(reread, action, hit.id, T0 + 5000).allowed)
+        .map((hit) => hit.id)
+        .sort((a, b) => a - b);
+      assert.deepEqual(
+        allowed,
+        Array.from({ length: perClient }, (_, i) => 100 + i),
+      );
+    }
+    // every denied hit deletes itself
+    const denied = domain.decideRateHit(reread, action, 100 + total - 1, T0 + 5000);
+    assert.equal(denied.allowed, false);
+    assert.deepEqual(denied.deleteRowIds, [100 + total - 1]);
   }
-  const blocked = request();
-  blocked._identity = { uid: 'fresh-req-user', email: 'fresh@example.test' };
-  blocked._clientKey = '192.0.2.200';
-  blocked.config.date = '2099-11-28';
-  assert.throws(
-    () => domain.publicAction(blocked, reqState, t0 + 5000),
-    (err) => err.status === 429,
+});
+
+test('global limit: distinct keys each under perClient allow exactly global, in any order', () => {
+  for (const action of ['chat', 'event-request']) {
+    const { global } = domain.RATE_LIMITS[action];
+    const hits = Array.from({ length: global + 10 }, (_, i) =>
+      hitAt(action, [keyOf(`user-${i}`)], T0 + i, `g${i}`, 500 + i),
+    );
+    const reread = hitRows(...hits);
+    const allowed = shuffled(hits, 9)
+      .filter((hit) => domain.decideRateHit(reread, action, hit.id, T0 + 5000).allowed)
+      .map((hit) => hit.id)
+      .sort((a, b) => a - b);
+    assert.deepEqual(
+      allowed,
+      Array.from({ length: global }, (_, i) => 500 + i),
+    );
+  }
+});
+
+test('hits of another action do not count', () => {
+  const chatHits = Array.from({ length: 40 }, (_, i) =>
+    hitAt('chat', [keyOf('x')], T0 + i, `c${i}`, 10 + i),
   );
+  const own = hitAt('event-request', [keyOf('x')], T0 + 100, 'own', 200);
+  const reread = hitRows(...chatHits, own);
+  assert.equal(domain.decideRateHit(reread, 'event-request', 200, T0 + 200).allowed, true);
 });
 
 test('a signed-in user cannot escape the per-client limit by rotating a spoofed forwarded IP', () => {
-  const t0 = 1_700_000_000_000;
-  let state = rows();
-  for (let i = 0; i < domain.RATE_LIMITS.chat.perClient; i++) {
-    const out = domain.publicAction(
-      {
-        action: 'chat',
-        _identity: { uid: 'rotating-user' },
-        _clientKey: `198.18.0.${i}`,
-        message: `Vraag ${i}`,
-      },
-      state,
-      t0 + i,
-    );
-    state = upsertParsed(state, out.rateLimitWrite);
+  for (const action of ['chat', 'event-request']) {
+    const { perClient } = domain.RATE_LIMITS[action];
+    const hits = [];
+    for (let i = 0; i < perClient + 1; i++) {
+      let body = chatBody('rotating-user', `198.18.0.${i}`);
+      if (action === 'event-request') {
+        body = request();
+        body._identity = { uid: 'rotating-user' };
+        body._clientKey = `198.18.0.${i}`;
+        body.config.date = `2099-12-${String(10 + i).padStart(2, '0')}`;
+      }
+      const ctx = domain.publicAction(body, rows(), T0 + i, `s${i}`);
+      assert.equal(ctx.hitRow.recordId, `ratehit:${action}:s${i}`);
+      hits.push(inserted(ctx.hitRow, 300 + i));
+    }
+    const reread = hitRows(...hits);
+    for (let i = 0; i < perClient; i++)
+      assert.equal(domain.decideRateHit(reread, action, 300 + i, T0 + 100).allowed, true);
+    assert.equal(domain.decideRateHit(reread, action, 300 + perClient, T0 + 100).allowed, false);
   }
-  assert.throws(
-    () =>
-      domain.publicAction(
-        {
-          action: 'chat',
-          _identity: { uid: 'rotating-user' },
-          _clientKey: '198.18.1.1',
-          message: 'Nieuw IP',
-        },
-        state,
-        t0 + 5000,
-      ),
-    (err) => err.status === 429,
-  );
+});
 
-  let reqState = rows();
-  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
-    const body = request();
-    body._clientKey = `198.18.2.${i}`;
-    body.config.date = `2099-12-${String(10 + i).padStart(2, '0')}`;
-    const out = domain.publicAction(body, reqState, t0);
-    reqState = upsertParsed(reqState, out.rateLimitWrite);
+test('expired hits count for nothing and at most 50 of them are returned for pruning', () => {
+  const { perClient, windowMs } = domain.RATE_LIMITS.chat;
+  const expired = Array.from({ length: 60 }, (_, i) =>
+    hitAt('chat', [keyOf('x')], T0 - windowMs - 1 - i, `e${i}`, 10 + i),
+  );
+  const own = hitAt('chat', [keyOf('x')], T0, 'own', 900);
+  const decision = domain.decideRateHit(hitRows(...expired, own), 'chat', 900, T0);
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.deleteRowIds.length, 50);
+  assert.ok(decision.deleteRowIds.every((id) => id >= 10 && id < 70));
+  assert.equal(new Set(decision.deleteRowIds).size, 50);
+  // a hit exactly one window old is expired too
+  const edge = hitAt('chat', [keyOf('x')], T0 - windowMs, 'edge', 5);
+  assert.deepEqual(domain.decideRateHit(hitRows(edge, own), 'chat', 900, T0).deleteRowIds, [5]);
+  // expired hits use no quota; a denied hit lists itself plus the expired ids
+  const fresh = Array.from({ length: perClient }, (_, i) =>
+    hitAt('chat', [keyOf('x')], T0 - 10 + i, `f${i}`, 100 + i),
+  );
+  const crowded = hitRows(...expired.slice(0, 3), ...fresh, own);
+  const denied = domain.decideRateHit(crowded, 'chat', 900, T0);
+  assert.equal(denied.allowed, false);
+  assert.deepEqual(denied.deleteRowIds, [900, 10, 11, 12]);
+});
+
+test('an own hit without a row id is denied, a rival without one counts as earlier', () => {
+  const { perClient } = domain.RATE_LIMITS['event-request'];
+  const own = hitAt('event-request', [keyOf('x')], T0, 'own', 50);
+  for (const id of [undefined, null, '', 'abc'])
+    assert.equal(domain.decideRateHit(hitRows(own), 'event-request', id, T0).allowed, false);
+  // our own row missing from the re-read: fail closed and delete the id we hold
+  assert.deepEqual(domain.decideRateHit(hitRows(), 'event-request', 50, T0), {
+    allowed: false,
+    deleteRowIds: [50],
+  });
+  const idless = Array.from({ length: perClient }, (_, i) =>
+    hitAt('event-request', [keyOf('x')], T0 + i, `i${i}`),
+  );
+  const denied = domain.decideRateHit(hitRows(...idless, own), 'event-request', 50, T0 + 100);
+  assert.equal(denied.allowed, false);
+  assert.deepEqual(denied.deleteRowIds, [50]);
+  const fewer = hitRows(...idless.slice(1), own);
+  assert.equal(domain.decideRateHit(fewer, 'event-request', 50, T0 + 100).allowed, true);
+});
+
+test('decideRateHit counts raw rows, so a duplicated recordId counts twice', () => {
+  const { perClient } = domain.RATE_LIMITS['event-request'];
+  const dup = hitAt('event-request', [keyOf('x')], T0, 'same');
+  const dups = Array.from({ length: perClient }, (_, i) => inserted(dup, 10 + i));
+  const own = hitAt('event-request', [keyOf('x')], T0 + 1, 'own', 99);
+  const reread = hitRows(...dups, own);
+  assert.equal(domain.decideRateHit(reread, 'event-request', 99, T0 + 2).allowed, false);
+});
+
+test('chat inserts a hit before Gemini, and invalid requests create no hit', () => {
+  const ctx = domain.publicAction(chatBody('chat-user', '203.0.113.10'), rows(), T0, 'x1');
+  assert.equal(ctx.route, 'hit');
+  assert.equal(ctx.chat, true);
+  assert.ok(ctx.geminiBody);
+  assert.equal(ctx.hitRow.kind, 'ratehit');
+  assert.equal(ctx.rateLimitWrite, undefined);
+  assert.equal(JSON.parse(ctx.hitRow.payload).data.keys.length, 2);
+  for (const message of ['', '   ', undefined]) {
+    assert.throws(
+      () => domain.publicAction({ ...chatBody('chat-user', '203.0.113.10'), message }, rows(), T0),
+      (err) => err.status === 400,
+    );
   }
-  const rotated = request();
-  rotated._clientKey = '198.18.3.1';
-  rotated.config.date = '2099-12-25';
+  const invalid = request();
+  invalid.config.participants = 99999;
   assert.throws(
-    () => domain.publicAction(rotated, reqState, t0 + 10_000),
-    (err) => err.status === 429,
+    () => domain.publicAction(invalid, rows(), T0),
+    (err) => err.status === 400,
   );
 });
 
-test('idempotent retry of an existing held event-request returns 200 even when rate limit is full', () => {
-  const t0 = 1_700_000_000_000;
-  const saved = savedRequest();
-  saved.body._clientKey = '203.0.113.55';
-  let state = [...saved.rows];
-  for (let i = 0; i < domain.RATE_LIMITS['event-request'].perClient; i++) {
-    const writeRow = domain.checkRateLimit(state, 'event-request', '203.0.113.55', t0 + i);
-    state = upsertParsed(state, writeRow);
-  }
-  // Confirm new requests from this client are rate-limited with 429
-  const fresh = request();
-  fresh._clientKey = '203.0.113.55';
-  fresh.config.date = '2099-12-20';
-  assert.throws(
-    () => domain.publicAction(fresh, state, t0 + 500),
-    (err) => err.status === 429,
+test('decideHit: allowed goes to Gemini with prune ids, denied deletes its own hit and answers 429', () => {
+  const { perClient } = domain.RATE_LIMITS.chat;
+  const old = hitAt('chat', [keyOf('other')], T0 - 4_000_000, 'old', 3);
+  const earlier = Array.from({ length: perClient }, (_, i) =>
+    hitAt('chat', [keyOf('chat-user')], T0 - 1000 + i, `p${i}`, 10 + i),
   );
-  // Retrying the already-saved requestId returns 200 receipt without hitting Gemini or 429
-  const retry = domain.publicAction(saved.body, state, t0 + 500);
+  const ctx = domain.publicAction(chatBody('chat-user', '203.0.113.10'), rows(), T0, 'mine');
+  const own = inserted(ctx.hitRow, 60);
+  const allowed = domain.decideHit(ctx, hitRows(old, own), 60, T0);
+  assert.equal(allowed.route, 'gemini');
+  assert.deepEqual(allowed.pruneRowIds, [3]);
+  assert.ok(allowed.geminiBody);
+  const denied = domain.decideHit(ctx, hitRows(old, ...earlier, own), 60, T0);
+  assert.equal(denied.route, 'lost');
+  assert.equal(denied.status, 429);
+  assert.match(denied.response.error, /Te veel verzoeken/);
+  assert.deepEqual(denied.deleteRowIds, [60, 3]);
+  assert.equal(denied.geminiBody, undefined);
+  // no usable id: fail closed with 503, never Gemini
+  const noId = domain.decideHit(ctx, hitRows(ctx.hitRow), undefined, T0);
+  assert.notEqual(noId.route, 'gemini');
+  assert.equal(noId.status, 503);
+});
+
+test('event-request: one claim row plus one hit row, settled together', () => {
+  const a = claimRequest();
+  assert.equal(a.context.route, 'claim');
+  assert.equal(a.context.hitRow.kind, 'ratehit');
+  assert.equal(JSON.parse(a.context.hitRow.payload).data.action, 'event-request');
+  // appointment and block claims carry no hit
+  assert.equal(claimBlock().hitRow, undefined);
+  assert.equal(domain.publicAction(appointmentBody(), snapshot()).hitRow, undefined);
+  // won slot + allowed hit -> Gemini with prune ids, no rateLimitWrite
+  const reread = snapshot(inserted(a.context.claimRow, 11), inserted(a.context.hitRow, 12));
+  const won = domain.settleClaim(a.context, reread, 11, 12, T0);
+  assert.equal(won.route, 'gemini');
+  assert.deepEqual(won.pruneRowIds, []);
+  assert.equal(won.rateLimitWrite, undefined);
+});
+
+test('event-request: losing the slot deletes both the claim and the hit', () => {
+  const a = claimRequest();
+  const b = claimRequest({ startTime: '12:00', endTime: '18:00' });
+  const reread = snapshot(
+    inserted(a.context.claimRow, 11),
+    inserted(b.context.claimRow, 12),
+    inserted(a.context.hitRow, 13),
+    inserted(b.context.hitRow, 14),
+  );
+  const lost = domain.settleClaim(b.context, reread, 12, 14, T0);
+  assert.equal(lost.route, 'lost');
+  assert.equal(lost.status, 409);
+  assert.deepEqual(lost.deleteRowIds, [12, 14]);
+  // without the insert's hit id the unambiguous row is still found by its unique recordId
+  assert.deepEqual(domain.settleClaim(b.context, reread, 12, undefined, T0).deleteRowIds, [12, 14]);
+  // when the hit cannot be found at all only the claim is deleted
+  const noHit = snapshot(inserted(a.context.claimRow, 11), inserted(b.context.claimRow, 12));
+  assert.deepEqual(domain.settleClaim(b.context, noHit, 12, undefined, T0).deleteRowIds, [12]);
+});
+
+test('event-request: a 429 after winning the slot deletes the claim, the hit and expired hits', () => {
+  const { perClient } = domain.RATE_LIMITS['event-request'];
+  const a = claimRequest();
+  const earlier = Array.from({ length: perClient }, (_, i) =>
+    hitAt('event-request', [keyOf('test-user')], T0 - 1000 + i, `q${i}`, 20 + i),
+  );
+  const old = hitAt('event-request', [keyOf('test-user')], T0 - 4_000_000, 'old', 5);
+  const reread = snapshot(
+    inserted(a.context.claimRow, 40),
+    inserted(a.context.hitRow, 41),
+    ...earlier,
+    old,
+  );
+  const result = domain.settleClaim(a.context, reread, 40, 41, T0);
+  assert.equal(result.route, 'lost');
+  assert.equal(result.status, 429);
+  assert.match(result.response.error, /Te veel verzoeken/);
+  assert.deepEqual(result.deleteRowIds, [40, 41, 5]);
+});
+
+test('event-request: an unusable hit id fails closed and deletes the claim', () => {
+  const a = claimRequest();
+  const reread = snapshot(inserted(a.context.claimRow, 40), inserted(a.context.hitRow, 41));
+  const result = domain.settleClaim(a.context, reread, 40, undefined, T0);
+  assert.equal(result.route, 'lost');
+  assert.equal(result.status, 503);
+  assert.ok(result.deleteRowIds.includes(40));
+  // an unusable claim id also removes our hit when it is unambiguous
+  const noClaimId = domain.settleClaim(a.context, reread, undefined, 41, T0);
+  assert.equal(noClaimId.status, 503);
+  assert.deepEqual([...noClaimId.deleteRowIds].sort(), [40, 41]);
+});
+
+test('event-request: a held retry inserts no hit, a claiming retry counts as a new hit', () => {
+  const s = savedRequest();
+  const held = domain.publicAction(s.body, snapshot(inserted(s.result.write, 3)), T0);
+  assert.equal(held.route, 'respond');
+  assert.equal(held.hitRow, undefined);
+  const mine = claimRequest();
+  const claimingRow = inserted(mine.context.claimRow, 20);
+  const claiming = domain.publicAction(mine.body, snapshot(claimingRow), T0, 'retry1');
+  assert.equal(claiming.route, 'hit');
+  assert.equal(claiming.hitRow.recordId, 'ratehit:event-request:retry1');
+  assert.ok(claiming.geminiBody);
+  const settled = domain.decideHit(
+    claiming,
+    snapshot(claimingRow, inserted(claiming.hitRow, 21)),
+    21,
+    T0,
+  );
+  assert.equal(settled.route, 'gemini');
+  assert.equal(settled.booking.id, mine.body.requestId);
+});
+
+test('idempotent retry of an existing held event-request returns 200 even when rate limit is full', () => {
+  const saved = savedRequest();
+  const full = Array.from({ length: 10 }, (_, i) =>
+    hitAt('event-request', [keyOf('test-user')], T0 + i, `f${i}`, 700 + i),
+  );
+  const state = [...saved.rows, ...domain.parseRows(full)];
+  const fresh = request();
+  fresh.config.date = '2099-12-20';
+  const ctx = domain.publicAction(fresh, state, T0 + 500, 'fresh');
+  const reread = [
+    ...state,
+    ...domain.parseRows([inserted(ctx.claimRow, 800), inserted(ctx.hitRow, 801)]),
+  ];
+  assert.equal(domain.settleClaim(ctx, reread, 800, 801, T0 + 500).status, 429);
+  const retry = domain.publicAction(saved.body, state, T0 + 500);
   assert.equal(retry.route, 'respond');
   assert.equal(retry.status, 200);
   assert.equal(retry.response.booking.id, saved.body.requestId);
 });
 
-test('raw caller IP is SHA-256 hashed, never stored in plain text, and ratelimit rows stay out of admin snapshot', () => {
+test('hit rows hold hashed keys only and never appear in the admin snapshot', () => {
   const { clientKeyFromHeaders, sha256 } = require('../code/auth-context.cjs');
   assert.equal(sha256('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   const rawIp = '203.0.113.77';
-  const fromForwarded = clientKeyFromHeaders({ 'X-Forwarded-For': `${rawIp}, 10.0.0.1` });
-  const fromCf = clientKeyFromHeaders({ 'cf-connecting-ip': rawIp });
-  const fromReal = clientKeyFromHeaders({ 'x-real-ip': rawIp });
+  const fromForwarded = clientKeyFromHeaders({
+    'X-Forwarded-For': `${rawIp}, 10.0.0.1`,
+  });
+  assert.equal(fromForwarded, clientKeyFromHeaders({ 'cf-connecting-ip': rawIp }));
+  assert.equal(fromForwarded, clientKeyFromHeaders({ 'x-real-ip': rawIp }));
   assert.match(fromForwarded, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(fromForwarded, fromCf);
-  assert.equal(fromForwarded, fromReal);
   assert.ok(!fromForwarded.includes(rawIp));
-
-  const out = domain.publicAction(
-    {
-      action: 'chat',
-      _identity: { uid: 'privacy-user' },
-      _clientKey: rawIp,
-      message: 'Test privacy',
-    },
-    rows(),
-    1_700_000_000_000,
-  );
-  assert.ok(!out.rateLimitWrite.payload.includes(rawIp));
-  const keys = Object.keys(JSON.parse(out.rateLimitWrite.payload).data.clients);
-  // One key for the Firebase uid, one for the caller IP; both hashed.
-  assert.equal(keys.length, 2);
-  for (const key of keys) assert.match(key, /^sha256:[0-9a-f]{64}$/);
-  assert.ok(!out.rateLimitWrite.payload.includes('privacy-user'));
-
-  const stateWithRateLimit = upsertParsed(rows(), out.rateLimitWrite);
-  const snap = domain.adminAction({ action: 'snapshot' }, stateWithRateLimit).response;
-  assert.ok(!JSON.stringify(snap).includes('ratelimit'));
+  const chat = domain.publicAction(chatBody('privacy-user', rawIp, 'Test privacy'), rows(), T0);
+  const event = request();
+  event._identity = { uid: 'privacy-user' };
+  event._clientKey = rawIp;
+  const claim = domain.publicAction(event, rows(), T0);
+  for (const hitRow of [chat.hitRow, claim.hitRow]) {
+    assert.ok(!hitRow.payload.includes(rawIp));
+    assert.ok(!hitRow.payload.includes('privacy-user'));
+    assert.ok(!hitRow.recordId.includes('privacy-user'));
+    const keys = JSON.parse(hitRow.payload).data.keys;
+    assert.equal(keys.length, 2);
+    for (const key of keys) assert.match(key, /^sha256:[0-9a-f]{64}$/);
+  }
+  const state = domain.parseRows([
+    ...baseRaw(),
+    inserted(chat.hitRow, 1),
+    inserted(claim.hitRow, 2),
+    inserted(domain.row('ratelimit', 'chat', { global: [T0], clients: {} }), 3),
+  ]);
+  const snap = domain.adminAction({ action: 'snapshot' }, state).response;
+  assert.ok(!JSON.stringify(snap).includes('ratehit'));
+  assert.ok(!JSON.stringify(snap).includes('sha256:'));
   assert.equal(snap.bookings.length, 0);
   assert.equal(snap.logs.length, 0);
 });
 
-test('Workflow B enforces Firebase auth on chat and upserts rate-limit row before Gemini', () => {
+/** Runs one generated Code node with a minimal n8n stub (`$`, `$input`). */
+function runCodeNode(wf, name, { input = [], nodes = {} } = {}) {
+  const node = wf.nodes.find((n) => n.name === name);
+  const items = (list) => list.map((json) => ({ json }));
+  const $ = (from) => {
+    const list = items(nodes[from] ?? []);
+    return { first: () => list[0], all: () => list };
+  };
+  const fn = vm.runInNewContext(`(function($input,$){${node.parameters.jsCode}\n})`);
+  const out = fn({ all: () => items(input), first: () => items(input)[0] }, $);
+  // Objects from the vm context have another realm's prototypes; round-trip for deepStrictEqual.
+  return JSON.parse(JSON.stringify(out.map((item) => item.json)));
+}
+
+for (const dir of ['workflows', 'workflows/prod']) {
+  const load = (file) =>
+    JSON.parse(fs.readFileSync(path.join(__dirname, `../${dir}/${file}`), 'utf8'));
+
+  test(`${dir} B wires insert hit, re-read, decide, then Gemini; no legacy rate-limit nodes`, () => {
+    const wf = load('B-public-api-and-proposals.json');
+    const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+    const next = (from, index = 0) =>
+      (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
+    for (const gone of [
+      'Rate limit payload',
+      'Record rate limit',
+      'After rate limit',
+      'Rate limit recorded',
+    ])
+      assert.equal(byName[gone], undefined, gone);
+    assert.doesNotMatch(JSON.stringify(wf), /rateLimitWrite|checkRateLimit|Rate limit recorded/);
+    // chat and the claiming retry take the hit route
+    assert.deepEqual(next('Needs claim', 0), ['Write claim']);
+    assert.deepEqual(next('Needs claim', 1), ['Needs hit']);
+    assert.equal(byName['Needs hit'].parameters.conditions.conditions[0].rightValue, 'hit');
+    assert.deepEqual(next('Needs hit', 0), ['Write hit']);
+    assert.deepEqual(next('Needs hit', 1), ['Result']);
+    assert.deepEqual(next('Write hit'), ['Insert hit']);
+    assert.equal(byName['Insert hit'].parameters.operation, 'insert');
+    assert.equal(byName['Insert hit'].onError, 'continueRegularOutput');
+    assert.deepEqual(next('Insert hit'), ['Re-read records after hit']);
+    assert.equal(byName['Re-read records after hit'].parameters.operation, 'get');
+    assert.deepEqual(next('Re-read records after hit'), ['Decide hit']);
+    assert.match(byName['Decide hit'].parameters.jsCode, /decideHit/);
+    assert.match(byName['Decide hit'].parameters.jsCode, /\$\('Insert hit'\)/);
+    assert.deepEqual(next('Decide hit'), ['Needs Gemini']);
+    assert.deepEqual(next('Settle claim'), ['Needs Gemini']);
+    // an allowed request calls Gemini; a denied one answers. Pruning runs only after Respond,
+    // so it never delays Gemini or the customer's answer.
+    assert.deepEqual(next('Needs Gemini', 0), ['Gemini']);
+    assert.deepEqual(next('Needs Gemini', 1), ['Result']);
+    assert.deepEqual(next('Respond'), ['Prune payload']);
+    assert.match(byName['Prune payload'].parameters.jsCode, /\$\('Needs Gemini'\)/);
+    assert.deepEqual(next('Prune payload'), ['Prune expired hits']);
+    const prune = byName['Prune expired hits'];
+    assert.equal(prune.parameters.operation, 'deleteRows');
+    assert.equal(prune.onError, 'continueRegularOutput');
+    assert.equal(prune.parameters.filters.conditions[0].keyName, 'id');
+    assert.equal(prune.parameters.filters.conditions[0].keyValue, '={{ $json.id }}');
+    assert.equal(wf.connections['Prune expired hits'], undefined, 'prune is a dead end');
+    // the decision sits before Gemini and PR #50's chain is intact
+    assert.match(byName['Gemini fallback'].parameters.jsonBody, /\$\("Needs Gemini"\)/);
+    assert.deepEqual(next('Gemini'), ['Gemini failed']);
+    assert.deepEqual(next('Gemini failed', 0), ['Gemini fallback']);
+    assert.deepEqual(next('Gemini failed', 1), ['Validate AI output']);
+    assert.deepEqual(next('Gemini fallback'), ['Validate AI output']);
+    assert.deepEqual(next('Validate AI output'), ['Result']);
+    // Gemini hangs only off the allow branch of the decision
+    const feeders = Object.entries(wf.connections)
+      .filter(([, v]) => v.main.flat().some((e) => e.node === 'Gemini'))
+      .map(([k]) => k);
+    assert.deepEqual(feeders, ['Needs Gemini']);
+    assert.equal(byName['Needs Gemini'].parameters.conditions.conditions[0].rightValue, 'gemini');
+  });
+
+  test(`${dir} B and C delete lost rows through one item per id and answer once`, () => {
+    for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
+      const wf = load(file);
+      const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+      const next = (from, index = 0) =>
+        (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
+      assert.deepEqual(next('Needs delete', 0), ['Lost claim ids']);
+      assert.deepEqual(next('Lost claim ids'), ['Delete lost claim']);
+      assert.deepEqual(next('Delete lost claim'), ['After lost claim']);
+      assert.deepEqual(next('After lost claim'), ['Respond']);
+      const del = byName['Delete lost claim'];
+      assert.equal(del.parameters.operation, 'deleteRows');
+      assert.equal(del.parameters.filters.conditions[0].keyName, 'id');
+      assert.equal(del.parameters.filters.conditions[0].keyValue, '={{ $json.id }}');
+      assert.equal(del.alwaysOutputData, true);
+      assert.equal(del.onError, 'continueRegularOutput');
+      assert.doesNotMatch(JSON.stringify(wf), /deleteRowId\b/);
+      assert.match(byName['After lost claim'].parameters.jsCode, /\$\('Result'\)\.first\(\)/);
+      const result = {
+        route: 'lost',
+        status: 429,
+        response: { error: 'x' },
+        deleteRowIds: [4, 9, 12],
+      };
+      assert.deepEqual(runCodeNode(wf, 'Lost claim ids', { nodes: { Result: [result] } }), [
+        { id: 4 },
+        { id: 9 },
+        { id: 12 },
+      ]);
+      // always at least one item, so the webhook is answered even for an empty id list
+      const empty = { ...result, deleteRowIds: [] };
+      assert.equal(runCodeNode(wf, 'Lost claim ids', { nodes: { Result: [empty] } }).length, 1);
+      // three delete outputs (one failed) still produce one answer
+      const answered = runCodeNode(wf, 'After lost claim', {
+        input: [{}, { error: 'x' }, {}],
+        nodes: { Result: [result] },
+      });
+      assert.deepEqual(answered, [{ status: 429, response: { error: 'x' } }]);
+    }
+  });
+
+  test(`${dir} B and C claim wiring: insert, re-read, settle by recordId, delete on loss`, () => {
+    for (const file of ['B-public-api-and-proposals.json', 'C-employee-api.json']) {
+      const wf = load(file);
+      const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+      const next = (from, index = 0) =>
+        (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
+      assert.equal(byName['Insert claim'].parameters.operation, 'insert');
+      assert.equal(byName['Re-read records after claim'].parameters.operation, 'get');
+      assert.match(byName['Settle claim'].parameters.jsCode, /settleClaim/);
+      assert.match(byName['Settle claim'].parameters.jsCode, /\$\('Insert claim'\)\.all\(\)/);
+      assert.doesNotMatch(byName['Settle claim'].parameters.jsCode, /Insert claim'\)\.first/);
+      assert.deepEqual(next('Route request'), ['Needs claim']);
+      assert.deepEqual(next('Needs claim', 0), ['Write claim']);
+      assert.deepEqual(next('Write claim'), ['Insert claim']);
+      assert.deepEqual(next('Insert claim'), ['Re-read records after claim']);
+      assert.deepEqual(next('Re-read records after claim'), ['Settle claim']);
+      assert.deepEqual(next('Settle claim'), [file.startsWith('B-') ? 'Needs Gemini' : 'Result']);
+      assert.deepEqual(next('Result'), ['Needs delete']);
+      assert.deepEqual(next('Needs delete', 1), ['Needs save']);
+    }
+  });
+
+  test(`${dir} B: Write claim emits claim and hit, Settle claim matches ids by recordId`, () => {
+    const wf = load('B-public-api-and-proposals.json');
+    const a = claimRequest();
+    const written = runCodeNode(wf, 'Write claim', {
+      nodes: { 'Route request': [a.context] },
+    });
+    assert.deepEqual(written, [a.context.claimRow, a.context.hitRow]);
+    const block = claimBlock();
+    assert.deepEqual(runCodeNode(wf, 'Write claim', { nodes: { 'Route request': [block] } }), [
+      block.claimRow,
+    ]);
+    const claimInserted = inserted(a.context.claimRow, 31);
+    const hitInserted = inserted(a.context.hitRow, 32);
+    // the insert node may return the ids in either order
+    for (const insertOutput of [
+      [claimInserted, hitInserted],
+      [hitInserted, claimInserted],
+    ]) {
+      const [out] = runCodeNode(wf, 'Settle claim', {
+        input: [...baseRaw(), claimInserted, hitInserted],
+        nodes: { 'Route request': [a.context], 'Insert claim': insertOutput },
+      });
+      assert.equal(out.route, 'gemini', JSON.stringify(out.response));
+      assert.deepEqual(out.pruneRowIds, []);
+    }
+    // If the insert output carries only system columns (no recordId), fall back to item order,
+    // which matches the order Write claim emitted.
+    const bare = (row) => ({ id: row.id, createdAt: row.createdAt });
+    const [positional] = runCodeNode(wf, 'Settle claim', {
+      input: [...baseRaw(), claimInserted, hitInserted],
+      nodes: {
+        'Route request': [a.context],
+        'Insert claim': [bare(claimInserted), bare(hitInserted)],
+      },
+    });
+    assert.equal(positional.route, 'gemini', JSON.stringify(positional.response));
+    // Mixed output (some recordIds present, ours missing) never guesses: it fails closed.
+    const [ambiguous] = runCodeNode(wf, 'Settle claim', {
+      input: [...baseRaw(), claimInserted, hitInserted],
+      nodes: {
+        'Route request': [a.context],
+        'Insert claim': [bare(claimInserted), { ...hitInserted, recordId: 'ratehit:other' }],
+      },
+    });
+    assert.notEqual(ambiguous.route, 'gemini');
+    const [failed] = runCodeNode(wf, 'Settle claim', {
+      input: [...baseRaw(), claimInserted, hitInserted],
+      nodes: {
+        'Route request': [a.context],
+        'Insert claim': [{ error: 'x' }, hitInserted],
+      },
+    });
+    assert.equal(failed.route, 'respond');
+    assert.equal(failed.status, 503);
+  });
+
+  test(`${dir} B: Decide hit answers 503 and never Gemini when the insert or re-read failed`, () => {
+    const wf = load('B-public-api-and-proposals.json');
+    const ctx = domain.publicAction(chatBody('chat-user', '203.0.113.10'), rows(), T0, 'd1');
+    const own = inserted(ctx.hitRow, 70);
+    const [ok] = runCodeNode(wf, 'Decide hit', {
+      input: [...baseRaw(), own],
+      nodes: { 'Route request': [ctx], 'Insert hit': [own] },
+    });
+    assert.equal(ok.route, 'gemini');
+    const [insertFailed] = runCodeNode(wf, 'Decide hit', {
+      input: [...baseRaw(), own],
+      nodes: { 'Route request': [ctx], 'Insert hit': [{ error: 'x' }] },
+    });
+    assert.equal(insertFailed.route, 'respond');
+    assert.equal(insertFailed.status, 503);
+    const [rereadFailed] = runCodeNode(wf, 'Decide hit', {
+      input: [{ error: 'db down' }],
+      nodes: { 'Route request': [ctx], 'Insert hit': [own] },
+    });
+    assert.equal(rereadFailed.route, 'respond');
+    assert.equal(rereadFailed.status, 503);
+    assert.equal(rereadFailed.geminiBody, undefined);
+    const pruned = runCodeNode(wf, 'Prune payload', {
+      input: [{ status: 200, response: {} }],
+      nodes: { 'Needs Gemini': [{ ...ok, pruneRowIds: [3, 4] }] },
+    });
+    assert.deepEqual(pruned, [{ id: 3 }, { id: 4 }]);
+    // Paths that never reached Needs Gemini (denied, lost, catalogue, 401) prune nothing.
+    assert.deepEqual(
+      runCodeNode(wf, 'Prune payload', { input: [{ status: 429, response: {} }] }),
+      [],
+    );
+  });
+
+  test(`${dir} B setup note names the rate-hit nodes`, () => {
+    const note = load('B-public-api-and-proposals.json').nodes.find((n) => n.name === 'Setup')
+      .parameters.content;
+    assert.doesNotMatch(note, /Record rate limit/);
+    assert.match(note, /Insert hit/);
+    assert.match(note, /Re-read records after hit/);
+    assert.match(note, /Prune expired hits/);
+  });
+}
+
+test('Workflow B enforces Firebase auth on chat and routes the caller key through Access', () => {
   const wf = JSON.parse(
     fs.readFileSync(path.join(__dirname, '../workflows/B-public-api-and-proposals.json'), 'utf8'),
   );
   const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
-  const next = (from, index = 0) =>
-    (wf.connections[from]?.main[index] ?? []).map((edge) => edge.node);
-
-  // Verify rate-limit Data Table upsert sits on the Needs Gemini -> Gemini path
-  assert.deepEqual(next('Needs Gemini', 0), ['Rate limit payload']);
-  assert.deepEqual(next('Rate limit payload'), ['Record rate limit']);
-  assert.equal(byName['Record rate limit'].type, 'n8n-nodes-base.dataTable');
-  assert.equal(byName['Record rate limit'].parameters.operation, 'upsert');
-  assert.deepEqual(next('Record rate limit'), ['After rate limit']);
-  assert.deepEqual(next('After rate limit'), ['Rate limit recorded']);
-  assert.deepEqual(next('Rate limit recorded', 0), ['Gemini']);
-  assert.deepEqual(next('Rate limit recorded', 1), ['Result']);
-
   // Execute Access node inside restricted VM context without require()
   const runAccess = (action, headers = {}) => {
     const fn = vm.runInNewContext(`(function($input){${byName['Access'].parameters.jsCode}\n})`);
@@ -1119,11 +1444,12 @@ test('Workflow B enforces Firebase auth on chat and upserts rate-limit row befor
   assert.equal(runAccess('chat', { 'x-forwarded-for': '198.51.100.42' }).route, 'verify');
   assert.equal(runAccess('event-request', { 'x-forwarded-for': '198.51.100.42' }).route, 'verify');
   assert.equal(runAccess('my-requests').route, 'verify');
-  const accessOut = runAccess('chat', { 'x-forwarded-for': '198.51.100.42, 10.0.0.5' });
+  const accessOut = runAccess('chat', {
+    'x-forwarded-for': '198.51.100.42, 10.0.0.5',
+  });
   assert.match(accessOut.clientKey, /^sha256:[0-9a-f]{64}$/);
   assert.ok(!JSON.stringify(accessOut).includes('198.51.100.42'));
 });
-
 // --- In-app appointments (#17) -----------------------------------------------------------
 function appointmentBody(overrides = {}) {
   return {
@@ -1314,7 +1640,7 @@ test('two simultaneous appointment bookings for the same slot resolve race-safel
   assert.equal(JSON.parse(winA.write.payload).data.claimStatus, 'held');
   assert.equal(loseB.route, 'lost');
   assert.equal(loseB.status, 409);
-  assert.equal(loseB.deleteRowId, 52);
+  assert.deepEqual(loseB.deleteRowIds, [52]);
   assert.match(loseB.response.error, /niet meer beschikbaar/);
 });
 

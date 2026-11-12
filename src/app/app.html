@@ -82,9 +82,7 @@
                 : 'n8n verbonden'
               : 'Lokale demo'
         }}</span
-        ><button class="avatar" aria-label="Medewerkersportaal openen" (click)="login = true">
-          H
-        </button>
+        ><button class="avatar" aria-label="Mijn account" (click)="login = true">H</button>
       </div>
     </header>
     <main id="main-content" tabindex="-1">
@@ -526,53 +524,70 @@
   >
 }
 @if (login) {
-  <app-modal heading="Mijn H20 account" (dismissed)="login = false"
-    ><p>
-      Log in om je aanvragen te bekijken. Medewerkers gebruiken hun eigen account met toegewezen
-      toegangsrechten.
-    </p>
-    <form (ngSubmit)="signIn()">
-      <div class="form-grid">
-        <label
-          >E-mailadres<input
-            name="email"
-            type="email"
-            [(ngModel)]="authEmail"
-            autocomplete="email"
-            required /></label
-        ><label
-          >Wachtwoord<input
-            name="password"
-            type="password"
-            [(ngModel)]="authPassword"
-            autocomplete="current-password"
-            minlength="8"
-            required
-        /></label>
-      </div>
-      @if (loginError) {
-        <p class="error" role="alert">{{ loginError }}</p>
-      }
-      <button class="primary" [disabled]="loginBusy || !authEmail || authPassword.length < 8">
-        {{ loginBusy ? 'Bezig…' : registering ? 'Account aanmaken' : 'Inloggen' }}</button
-      ><button type="button" class="text-button" (click)="registering = !registering">
-        {{ registering ? 'Ik heb al een account' : 'Nieuw klantaccount aanmaken' }}</button
-      ><button
-        type="button"
-        class="text-button"
-        (click)="resetPassword()"
-        [disabled]="loginBusy || !authEmail"
-      >
-        Wachtwoord vergeten
-      </button>
-    </form>
-    @if (!store.live()) {
-      <hr />
+  <app-modal heading="Mijn H20 account" (dismissed)="login = false">
+    @if (auth.user()) {
       <p>
-        De online evenementendatabase is nog niet verbonden. Je kunt de interface met
-        voorbeeldgegevens bekijken.
+        Ingelogd als <strong>{{ auth.user()?.email }}</strong
+        >.
       </p>
-      <button (click)="demoAdmin()">Open beheerdemo</button>
+      @if (admin()) {
+        <button class="primary" routerLink="/admin" (click)="login = false">
+          Naar medewerkersportaal
+        </button>
+      } @else {
+        <p>
+          Dit account heeft geen medewerkersrechten. Een beheerder kent deze toe via de staff-claim.
+        </p>
+      }
+      <button type="button" (click)="logout(); login = false">Uitloggen</button>
+    } @else {
+      <p>
+        Log in om je aanvragen te bekijken. Medewerkers gebruiken hun eigen account met toegewezen
+        toegangsrechten.
+      </p>
+      <form (ngSubmit)="signIn()">
+        <div class="form-grid">
+          <label
+            >E-mailadres<input
+              name="email"
+              type="email"
+              [(ngModel)]="authEmail"
+              autocomplete="email"
+              required /></label
+          ><label
+            >Wachtwoord<input
+              name="password"
+              type="password"
+              [(ngModel)]="authPassword"
+              autocomplete="current-password"
+              minlength="8"
+              required
+          /></label>
+        </div>
+        @if (loginError) {
+          <p class="error" role="alert">{{ loginError }}</p>
+        }
+        <button class="primary" [disabled]="loginBusy || !authEmail || authPassword.length < 8">
+          {{ loginBusy ? 'Bezig…' : registering ? 'Account aanmaken' : 'Inloggen' }}</button
+        ><button type="button" class="text-button" (click)="registering = !registering">
+          {{ registering ? 'Ik heb al een account' : 'Nieuw klantaccount aanmaken' }}</button
+        ><button
+          type="button"
+          class="text-button"
+          (click)="resetPassword()"
+          [disabled]="loginBusy || !authEmail"
+        >
+          Wachtwoord vergeten
+        </button>
+      </form>
+      @if (!store.live()) {
+        <hr />
+        <p>
+          De online evenementendatabase is nog niet verbonden. Je kunt de interface met
+          voorbeeldgegevens bekijken.
+        </p>
+        <button (click)="demoAdmin()">Open beheerdemo</button>
+      }
     }
   </app-modal>
 }
