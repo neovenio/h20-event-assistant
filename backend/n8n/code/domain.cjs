@@ -110,16 +110,28 @@ function hashClientKey(value) {
   if (/^sha256:[0-9a-f]{64}$/.test(normalized)) return normalized;
   return `sha256:${sha256(`h20-rl:${normalized.toLowerCase()}`)}`;
 }
-function resolveClientKey(body) {
-  const raw =
-    text(body?._clientKey, 200) ||
-    (body?._identity?.uid ? `uid:${body._identity.uid}` : 'anonymous');
-  return hashClientKey(raw);
+/**
+ * A request counts against its verified Firebase uid AND its caller IP. The IP comes from a
+ * forwarded header a client can spoof, so the uid stops one account from rotating it; the IP still
+ * limits many accounts behind one address.
+ */
+function resolveClientKeys(body) {
+  const keys = [];
+  if (body?._identity?.uid) keys.push(hashClientKey(`uid:${body._identity.uid}`));
+  const ip = text(body?._clientKey, 200);
+  if (ip) keys.push(hashClientKey(ip));
+  return keys.length ? [...new Set(keys)] : [hashClientKey('anonymous')];
 }
-function checkRateLimit(rows, action, clientKey, nowMs = Date.now()) {
+function checkRateLimit(rows, action, clientKeys, nowMs = Date.now()) {
   const limit = RATE_LIMITS[action];
   if (!limit) fail('Onbekende actie.', 404);
-  const hashedKey = hashClientKey(text(clientKey, 200) || 'anonymous');
+  const hashedKeys = [
+    ...new Set(
+      (Array.isArray(clientKeys) ? clientKeys : [clientKeys]).map((key) =>
+        hashClientKey(text(key, 200) || 'anonymous'),
+      ),
+    ),
+  ];
   const recordId = `ratelimit:${action}`;
   const existing = array(rows).find(
     (item) => item.kind === 'ratelimit' && item.recordId === recordId,
@@ -140,11 +152,14 @@ function checkRateLimit(rows, action, clientKey, nowMs = Date.now()) {
     const active = array(stamps).filter((ts) => Number.isFinite(ts) && ts > cutoff);
     if (active.length) clients[key] = active;
   }
-  const activeClient = clients[hashedKey] ?? [];
-  if (activeClient.length >= limit.perClient || activeGlobal.length >= limit.global)
+  if (
+    hashedKeys.some((key) => (clients[key] ?? []).length >= limit.perClient) ||
+    activeGlobal.length >= limit.global
+  )
     fail('Te veel verzoeken. Probeer het over enkele minuten opnieuw.', 429);
   const nextGlobal = [...activeGlobal, nowMs];
-  const nextClients = { ...clients, [hashedKey]: [...activeClient, nowMs] };
+  const nextClients = { ...clients };
+  for (const key of hashedKeys) nextClients[key] = [...(clients[key] ?? []), nowMs];
   return row('ratelimit', action, { global: nextGlobal, clients: nextClients });
 }
 function fail(message, status = 400) {
@@ -641,11 +656,11 @@ function recommendConfiguration(body, rows) {
     customerNotes: '',
   };
 }
-function requestContext(body, rows, validated, booking, route, rateLimitWrite, clientKey, nowMs) {
+function requestContext(body, rows, validated, booking, route, rateLimitWrite, clientKeys, nowMs) {
   return {
     route,
     rateLimitWrite,
-    clientKey,
+    clientKeys,
     nowMs,
     status: 201,
     claimKind: 'booking',
@@ -688,8 +703,8 @@ function reverifyRequest(body, rows, existing, nowMs = Date.now()) {
   if (!validId(existing.rowId))
     fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
   if (!resolveClaim(rows, claim).won) return lostClaim(existing.rowId);
-  const clientKey = resolveClientKey(body);
-  const rateLimitWrite = checkRateLimit(dedupe(rows), 'event-request', clientKey, nowMs);
+  const clientKeys = resolveClientKeys(body);
+  const rateLimitWrite = checkRateLimit(dedupe(rows), 'event-request', clientKeys, nowMs);
   // Own and rival claims are excluded: the conflict check already ran when the claim was inserted.
   const catalogueRows = rows.filter((r) => r.kind !== 'booking' && r.kind !== 'block');
   const validated = validateRequest(body, catalogueRows);
@@ -700,7 +715,7 @@ function reverifyRequest(body, rows, existing, nowMs = Date.now()) {
     existing.data,
     'gemini',
     rateLimitWrite,
-    clientKey,
+    clientKeys,
     nowMs,
   );
 }
@@ -756,7 +771,7 @@ function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now(
     rateLimitWrite = checkRateLimit(
       dedupe(rows),
       'event-request',
-      context.clientKey || 'anonymous',
+      context.clientKeys ?? 'anonymous',
       nowMs,
     );
   } catch (error) {
@@ -857,8 +872,8 @@ function publicAction(body, allRows, nowMs = Date.now()) {
         return reverifyRequest(body, allRows, existing, nowMs);
       return response({ booking: publicBooking(existing.data) });
     }
-    const clientKey = resolveClientKey(body);
-    const rateLimitWrite = checkRateLimit(rows, 'event-request', clientKey, nowMs);
+    const clientKeys = resolveClientKeys(body);
+    const rateLimitWrite = checkRateLimit(rows, 'event-request', clientKeys, nowMs);
     const validated = validateRequest(body, rows);
     const booking = { ...buildBooking(body, validated), claimStatus: 'claiming' };
     return requestContext(
@@ -868,13 +883,13 @@ function publicAction(body, allRows, nowMs = Date.now()) {
       booking,
       'claim',
       rateLimitWrite,
-      clientKey,
+      clientKeys,
       nowMs,
     );
   }
   if (body.action === 'chat') {
     if (!body._identity?.uid) fail('Log eerst in om de AI-assistent te gebruiken.', 401);
-    const rateLimitWrite = checkRateLimit(rows, 'chat', resolveClientKey(body), nowMs);
+    const rateLimitWrite = checkRateLimit(rows, 'chat', resolveClientKeys(body), nowMs);
     const message = text(body.message, 2000);
     if (!message) fail('Vul een bericht in.');
     const recommendation = recommendConfiguration(body, rows);
@@ -1097,6 +1112,9 @@ function adminAction(body, allRows) {
         createdAt: new Date().toISOString(),
       });
     } else {
+      // Reopening a closed request would re-block its slot without an overlap check.
+      if (['Cancelled', 'Refunded'].includes(b.reservation.bookingStatus))
+        fail('Deze aanvraag is afgesloten.', 409);
       if (!text(body.explanation, 12000)) fail('Voorsteltekst is leeg.');
       b.explanation = text(body.explanation, 12000);
       b.reviewNotes = text(body.reviewNotes);
@@ -1160,7 +1178,7 @@ function adminAction(body, allRows) {
     const room = records(rows, 'room').find((r) => r.id === block.roomId);
     if (
       !room ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(block.date) ||
+      !validIsoDate(block.date) ||
       !(minutes(block.endTime) > minutes(block.startTime)) ||
       !text(block.reason)
     )
