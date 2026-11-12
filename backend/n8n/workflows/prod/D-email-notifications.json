@@ -1,0 +1,229 @@
+{
+  "name": "[PROD] H20 D — Request and approval notifications",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "OPTIONAL — these are the [PROD] files: keep inactive until sender, SMTP credential and the h20_records_prod Data Table are bound. FRONTEND_ORIGIN in Prepare mail is already https://h20-event-assistant-prod.web.app. Test with your own address first. Production schedule sends real customer emails. Delivery is at-least-once: a failure after sending but before recording the receipt can cause a duplicate. A receipt is written only after successful SMTP delivery.",
+        "height": 220,
+        "width": 650
+      },
+      "id": "setup",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, -250]
+    },
+    {
+      "parameters": {},
+      "id": "manual",
+      "name": "Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "every-five-minutes",
+      "name": "Every five minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 180]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_H20_DATA_TABLE_ID",
+          "mode": "id"
+        },
+        "returnAll": true
+      },
+      "id": "read-records",
+      "name": "Read records",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [220, 0],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const FRONTEND_ORIGIN = 'https://h20-event-assistant-prod.web.app';\nfunction notificationJobs(rows, frontendUrl) {\n  const origin = new URL(frontendUrl);\n  if (origin.protocol !== 'https:') throw new Error('Use the deployed HTTPS frontend URL.');\n  const parsed = rows\n    .filter((row) => typeof row.payload === 'string')\n    .map((row) => ({ ...row, value: JSON.parse(row.payload) }));\n  const sent = new Set(\n    parsed.filter((row) => row.kind === 'notification').map((row) => row.recordId),\n  );\n  const jobs = [];\n  for (const row of parsed.filter(\n    (row) =>\n      row.kind === 'booking' && !row.value.deleted && row.value.data.claimStatus !== 'claiming',\n  )) {\n    const b = row.value.data;\n    const events = ['received', ...(b.requestStatus === 'approved' ? ['approved'] : [])];\n    for (const event of events) {\n      const recordId = `notification:${b.id}:${event}`;\n      if (sent.has(recordId)) continue;\n      const link = `${origin.origin}/#request=${encodeURIComponent(b.id)}&token=${encodeURIComponent(row.value.customerToken)}`;\n      jobs.push({\n        recordId,\n        kind: 'notification',\n        payload: JSON.stringify({\n          data: { bookingId: b.id, event, sentAt: new Date().toISOString() },\n        }),\n        to: b.customer.email,\n        subject: `H20 ${b.reference} — ${event === 'approved' ? 'voorstel beoordeeld' : 'aanvraag ontvangen'}`,\n        text: `Beste ${b.customer.fullName},\\n\\n${event === 'approved' ? 'Een medewerker heeft je conceptvoorstel beoordeeld. Bekijk het voorstel via je persoonlijke link.' : 'Je evenementaanvraag is ontvangen. Het team beoordeelt je wensen en de voorlopige planning.'}\\n\\n${link}\\n\\nDit is nog geen definitieve reservering of betaalverzoek. Bewaar deze persoonlijke link en deel hem alleen met mensen die jouw aanvraag mogen bekijken.\\n\\nH20 Event Assistant`,\n      });\n    }\n  }\n  return jobs;\n}\n\nreturn notificationJobs($input.all().map(item=>item.json), FRONTEND_ORIGIN).map(json=>({json}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "prepare-mail",
+      "name": "Prepare mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "REPLACE_WITH_VERIFIED_SENDER",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "send-email",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item,index)=>({json:$('Prepare mail').all()[index].json}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "delivery-receipts",
+      "name": "Delivery receipts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_H20_DATA_TABLE_ID",
+          "mode": "id"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "recordId",
+              "condition": "eq",
+              "keyValue": "={{ $json.recordId }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "recordId": "={{ $json.recordId }}",
+            "kind": "={{ $json.kind }}",
+            "payload": "={{ $json.payload }}"
+          },
+          "schema": [
+            {
+              "id": "recordId",
+              "displayName": "recordId",
+              "type": "string"
+            },
+            {
+              "id": "kind",
+              "displayName": "kind",
+              "type": "string"
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "record-delivery",
+      "name": "Record delivery",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1100, 0]
+    }
+  ],
+  "connections": {
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Read records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every five minutes": {
+      "main": [
+        [
+          {
+            "node": "Read records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read records": {
+      "main": [
+        [
+          {
+            "node": "Prepare mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare mail": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email": {
+      "main": [
+        [
+          {
+            "node": "Delivery receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery receipts": {
+      "main": [
+        [
+          {
+            "node": "Record delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "timezone": "Europe/Amsterdam"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}

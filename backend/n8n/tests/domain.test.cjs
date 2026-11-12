@@ -307,9 +307,22 @@ test('notification jobs are scoped to customer and skipped after delivery receip
   const prepareNode = mailWf.nodes.find((n) => n.name === 'Prepare mail');
   assert.match(prepareNode.parameters.jsCode, /const FRONTEND_ORIGIN = 'https:\/\//);
 });
+const workflowsDir = path.join(__dirname, '../workflows');
+const prodDir = path.join(workflowsDir, 'prod');
+const readWorkflows = (dir) =>
+  fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => ({
+      file: entry.name,
+      wf: JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8')),
+    }));
+const readJsonFile = (...parts) =>
+  JSON.parse(fs.readFileSync(path.join(__dirname, '../../..', ...parts), 'utf8'));
 test('workflow exports have valid connections, authentication and compilable Code nodes', () => {
-  for (const file of fs.readdirSync(path.join(__dirname, '../workflows'))) {
-    const wf = JSON.parse(fs.readFileSync(path.join(__dirname, '../workflows', file), 'utf8'));
+  const exports = [...readWorkflows(workflowsDir), ...readWorkflows(prodDir)];
+  assert.equal(exports.length, 7);
+  for (const { file, wf } of exports) {
     const names = new Set(wf.nodes.map((n) => n.name));
     assert.equal(wf.active, false);
     for (const [name, outputs] of Object.entries(wf.connections)) {
@@ -320,6 +333,72 @@ test('workflow exports have valid connections, authentication and compilable Cod
       new vm.Script(`(function(){${node.parameters.jsCode}\n})`);
     if (file.startsWith('C-')) assert.ok(wf.nodes.some((n) => n.name === 'Verify Firebase token'));
   }
+});
+test('prod workflows B, C and D use only prod values', () => {
+  const prodApiKey = readJsonFile('config/runtime/prod.json').firebase.apiKey;
+  const devApiKey = readJsonFile('public/h20-runtime.json').firebase.apiKey;
+  assert.ok(prodApiKey && devApiKey && prodApiKey !== devApiKey);
+  const prod = readWorkflows(prodDir);
+  assert.deepEqual(
+    prod.map((p) => p.file),
+    ['B-public-api-and-proposals.json', 'C-employee-api.json', 'D-email-notifications.json'],
+  );
+  for (const { file, wf } of prod) {
+    assert.ok(wf.name.startsWith('[PROD] '), wf.name);
+    assert.ok(!JSON.stringify(wf).includes(devApiKey), `${file} contains the dev apiKey`);
+    assert.ok(!JSON.stringify(wf).includes('http://localhost'), file);
+    assert.ok(!JSON.stringify(wf).includes('h20-event-assistant-dev'), file);
+    const setup = wf.nodes.find((n) => n.name === 'Setup').parameters.content;
+    assert.match(setup, /\[PROD\]/);
+    assert.match(setup, /h20_records_prod/);
+    if (file.startsWith('D-')) {
+      const prepare = wf.nodes.find((n) => n.name === 'Prepare mail').parameters.jsCode;
+      assert.match(
+        prepare,
+        /const FRONTEND_ORIGIN = 'https:\/\/h20-event-assistant-prod\.web\.app';/,
+      );
+      continue;
+    }
+    const admin = file.startsWith('C-');
+    const webhook = wf.nodes.find((n) => n.name === 'Webhook');
+    assert.equal(webhook.parameters.path, `h20-prod/${admin ? 'admin' : 'public'}`);
+    assert.equal(webhook.webhookId, `h20-prod-${admin ? 'admin' : 'public'}`);
+    assert.equal(
+      webhook.parameters.options.allowedOrigins,
+      'https://h20-event-assistant-prod.web.app,https://h20-event-assistant-prod.firebaseapp.com',
+    );
+    const lookup = wf.nodes.find((n) => n.name === 'Verify Firebase token').parameters.url;
+    assert.equal(
+      lookup,
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${prodApiKey}`,
+    );
+  }
+});
+test('dev workflows still use the dev webhook paths and dev apiKey', () => {
+  const devApiKey = readJsonFile('public/h20-runtime.json').firebase.apiKey;
+  const b = readWorkflows(workflowsDir).find((w) => w.file.startsWith('B-')).wf;
+  assert.equal(b.nodes.find((n) => n.name === 'Webhook').parameters.path, 'h20/public');
+  assert.ok(
+    b.nodes.find((n) => n.name === 'Verify Firebase token').parameters.url.endsWith(devApiKey),
+  );
+  assert.ok(!b.name.startsWith('[PROD]'));
+});
+test('generator refuses to write prod workflows when the prod apiKey is empty', () => {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'h20-prod-config-'));
+  const config = readJsonFile('config/runtime/prod.json');
+  config.firebase.apiKey = '';
+  const file = path.join(dir, 'prod.json');
+  fs.writeFileSync(file, JSON.stringify(config));
+  const before = fs.readFileSync(path.join(prodDir, 'C-employee-api.json'), 'utf8');
+  const result = require('node:child_process').spawnSync(
+    process.execPath,
+    [path.join(__dirname, '../generate-workflows.cjs')],
+    { env: { ...process.env, H20_PROD_RUNTIME_CONFIG: file }, encoding: 'utf8' },
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /firebase\.apiKey is empty/);
+  assert.equal(fs.readFileSync(path.join(prodDir, 'C-employee-api.json'), 'utf8'), before);
 });
 
 test('live chat suggests only a published room that fits the group', () => {
