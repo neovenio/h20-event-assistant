@@ -19,7 +19,7 @@ import { emptyConfiguration } from '../event-utils';
       {{
         store.live()
           ? 'Plan samen jouw evenement. Een medewerker beoordeelt elk voorstel.'
-          : 'Verken de mogelijkheden met de lokale keuzehulp. Live AI is nog niet verbonden.'
+          : 'Verken de mogelijkheden met de lokale keuzehulp.'
       }}
     </p>
     <div class="chat-messages" aria-live="polite">
