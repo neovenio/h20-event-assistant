@@ -1239,9 +1239,12 @@ for (const dir of ['workflows', 'workflows/prod']) {
     assert.match(byName['Decide hit'].parameters.jsCode, /\$\('Insert hit'\)/);
     assert.deepEqual(next('Decide hit'), ['Needs Gemini']);
     assert.deepEqual(next('Settle claim'), ['Needs Gemini']);
-    // an allowed request prunes expired hits (best effort) and calls Gemini; a denied one answers
-    assert.deepEqual(next('Needs Gemini', 0), ['Prune payload', 'Gemini']);
+    // an allowed request calls Gemini; a denied one answers. Pruning runs only after Respond,
+    // so it never delays Gemini or the customer's answer.
+    assert.deepEqual(next('Needs Gemini', 0), ['Gemini']);
     assert.deepEqual(next('Needs Gemini', 1), ['Result']);
+    assert.deepEqual(next('Respond'), ['Prune payload']);
+    assert.match(byName['Prune payload'].parameters.jsCode, /\$\('Needs Gemini'\)/);
     assert.deepEqual(next('Prune payload'), ['Prune expired hits']);
     const prune = byName['Prune expired hits'];
     assert.equal(prune.parameters.operation, 'deleteRows');
@@ -1352,6 +1355,26 @@ for (const dir of ['workflows', 'workflows/prod']) {
       assert.equal(out.route, 'gemini', JSON.stringify(out.response));
       assert.deepEqual(out.pruneRowIds, []);
     }
+    // If the insert output carries only system columns (no recordId), fall back to item order,
+    // which matches the order Write claim emitted.
+    const bare = (row) => ({ id: row.id, createdAt: row.createdAt });
+    const [positional] = runCodeNode(wf, 'Settle claim', {
+      input: [...baseRaw(), claimInserted, hitInserted],
+      nodes: {
+        'Route request': [a.context],
+        'Insert claim': [bare(claimInserted), bare(hitInserted)],
+      },
+    });
+    assert.equal(positional.route, 'gemini', JSON.stringify(positional.response));
+    // Mixed output (some recordIds present, ours missing) never guesses: it fails closed.
+    const [ambiguous] = runCodeNode(wf, 'Settle claim', {
+      input: [...baseRaw(), claimInserted, hitInserted],
+      nodes: {
+        'Route request': [a.context],
+        'Insert claim': [bare(claimInserted), { ...hitInserted, recordId: 'ratehit:other' }],
+      },
+    });
+    assert.notEqual(ambiguous.route, 'gemini');
     const [failed] = runCodeNode(wf, 'Settle claim', {
       input: [...baseRaw(), claimInserted, hitInserted],
       nodes: {
@@ -1386,9 +1409,15 @@ for (const dir of ['workflows', 'workflows/prod']) {
     assert.equal(rereadFailed.status, 503);
     assert.equal(rereadFailed.geminiBody, undefined);
     const pruned = runCodeNode(wf, 'Prune payload', {
-      input: [{ ...ok, pruneRowIds: [3, 4] }],
+      input: [{ status: 200, response: {} }],
+      nodes: { 'Needs Gemini': [{ ...ok, pruneRowIds: [3, 4] }] },
     });
     assert.deepEqual(pruned, [{ id: 3 }, { id: 4 }]);
+    // Paths that never reached Needs Gemini (denied, lost, catalogue, 401) prune nothing.
+    assert.deepEqual(
+      runCodeNode(wf, 'Prune payload', { input: [{ status: 429, response: {} }] }),
+      [],
+    );
   });
 
   test(`${dir} B setup note names the rate-hit nodes`, () => {

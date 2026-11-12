@@ -242,7 +242,7 @@ function apiWorkflow(admin) {
     ),
   );
   // Reserve first, verify after: insert the claim row, re-read everything, lowest Data Table row id wins.
-  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const inserts=$('Insert claim').all().map(item=>item.json);if(inserts.some(item=>item.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);const context=$('Route request').first().json;const idOf=(recordId)=>inserts.find(item=>item.recordId===recordId)?.id;return [{json:settleClaim(context,parseRows(items),idOf(context.claimRow.recordId),context.hitRow?idOf(context.hitRow.recordId):undefined)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
+  const settle = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const inserts=$('Insert claim').all().map(item=>item.json);if(inserts.some(item=>item.error))fail('Opslaan mislukt. Probeer opnieuw met dezelfde aanvraagreferentie.',503);const context=$('Route request').first().json;const written=[context.claimRow,context.hitRow].filter(Boolean);const keyed=inserts.some(item=>item.recordId!=null);const idOf=(row)=>keyed?inserts.find(item=>item.recordId===row.recordId)?.id:inserts.length===written.length?inserts[written.indexOf(row)]?.id:undefined;return [{json:settleClaim(context,parseRows(items),idOf(context.claimRow),context.hitRow?idOf(context.hitRow):undefined)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   // Hit-only requests (chat, claiming retry): decide on our own hit after the re-read, before Gemini.
   const decide = `${domain}\ntry{const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const inserts=$('Insert hit').all().map(item=>item.json);if(inserts.some(item=>item.error))fail('De database is niet beschikbaar.',503);return [{json:decideHit($('Route request').first().json,parseRows(items),inserts[0]?.id)}];}catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
   const routing = `${domain}\ntry { const items=$input.all().map(item=>item.json);if(items.some(item=>item.error))throw new Error('De database is niet beschikbaar.');const body=$('Webhook').first().json.body??{};if(JSON.stringify(body).length>25000)fail('Verzoek is te groot.',413);return [{json:${admin ? 'adminAction' : 'publicAction'}(body,parseRows(items))}]; }catch(error){return [{json:{route:'respond',status:error.status??503,response:{error:error.message??'Verzoek mislukt.'}}}];}`;
@@ -293,11 +293,12 @@ function apiWorkflow(admin) {
       ),
     );
     nodes.push(code('Decide hit', decide, 1540, 360));
-    // Best-effort prune of expired hits: one item per id, errors ignored, a dead-end branch.
+    // Best-effort prune of expired hits after Respond: one item per id, errors ignored, a dead end.
+    // Paths that never reached Needs Gemini prune nothing.
     nodes.push(
       code(
         'Prune payload',
-        'return ($input.first().json.pruneRowIds??[]).map(id=>({json:{id}}));',
+        "try{return ($('Needs Gemini').first().json.pruneRowIds??[]).map(id=>({json:{id}}));}catch{return [];}",
         1320,
         -300,
       ),
@@ -383,8 +384,6 @@ function apiWorkflow(admin) {
     connect(connections, 'Insert hit', 'Re-read records after hit');
     connect(connections, 'Re-read records after hit', 'Decide hit');
     connect(connections, 'Decide hit', 'Needs Gemini');
-    // Prune first (best effort, never blocks), then Gemini; a denied request answers instead.
-    connect(connections, 'Needs Gemini', 'Prune payload');
     connect(connections, 'Needs Gemini', 'Gemini');
     connect(connections, 'Needs Gemini', 'Result', 1);
     connect(connections, 'Prune payload', 'Prune expired hits');
@@ -468,6 +467,8 @@ function apiWorkflow(admin) {
   connect(connections, 'Write payload', 'Save record');
   connect(connections, 'Save record', 'After save');
   connect(connections, 'After save', 'Respond');
+  // Prune only after the webhook is answered, so it never delays Gemini or the reply.
+  if (!admin) connect(connections, 'Respond', 'Prune payload');
   write(
     admin ? 'C-employee-api.json' : 'B-public-api-and-proposals.json',
     admin ? 'H20 C — Employee review API' : 'H20 B — Public catalogue and proposal generator',
