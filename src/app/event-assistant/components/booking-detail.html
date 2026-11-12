@@ -8,7 +8,9 @@
       <span class="badge">{{ b.reference }}</span>
       <h2>{{ b.event.name }}</h2>
     </div>
-    <span class="status-pill">{{ b.requestStatus || b.reservation.bookingStatus }}</span>
+    <span class="status-pill">{{
+      statusLabel(b.requestStatus || b.reservation.bookingStatus)
+    }}</span>
   </div>
   <p class="notice">
     Conceptaanvraag ·

@@ -51,6 +51,11 @@ export class EventBuilder implements OnInit {
       this.store.live() ? this.store.activities() : undefined,
     );
   }
+  /** A chosen room without a published rate: its cost is on request, not €0. */
+  get roomRateUnknown(): boolean {
+    const ids = [this.config.selectedRoomId, ...this.config.additionalRooms.map((r) => r.id)];
+    return this.store.rooms().some((room) => ids.includes(room.id) && room.baseHourlyRate == null);
+  }
   get recommendedRoom(): Room | undefined {
     const budget = Number(this.config.budgetRange) || Infinity;
     const hours = Math.max(1, duration(this.config.startTime, this.config.endTime));

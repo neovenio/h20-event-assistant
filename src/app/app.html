@@ -177,7 +177,9 @@
                 <div class="card-grid dashboard-rooms">
                   @for (room of store.activeRooms().slice(0, 4); track room.id) {
                     <article class="card">
-                      <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+                      @if (room.imageUrl) {
+                        <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+                      }
                       <div class="card-body">
                         <h3>{{ room.name }}</h3>
                         <p>{{ room.capacityDisplay }}</p>
@@ -235,7 +237,9 @@
           <div class="card-grid">
             @for (room of visibleRooms; track room.id) {
               <article class="card">
-                <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+                @if (room.imageUrl) {
+                  <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+                }
                 <div class="card-body">
                   <span class="badge">{{ room.category }}</span>
                   <h2>{{ room.name }}</h2>
@@ -394,7 +398,7 @@
             @for (b of store.ownBookings(); track b.id) {
               <article class="panel">
                 <span class="status-pill">{{
-                  b.requestStatus || b.reservation.bookingStatus
+                  statusLabel(b.requestStatus || b.reservation.bookingStatus)
                 }}</span>
                 <h2>{{ b.event.name }}</h2>
                 <p>{{ b.reference }}</p>
@@ -496,8 +500,10 @@
   /></app-modal>
 }
 @if (selectedRoom) {
-  <app-modal [heading]="selectedRoom.name" (dismissed)="selectedRoom = null"
-    ><img class="room-cover" [src]="selectedRoom.imageUrl" [alt]="selectedRoom.name" />
+  <app-modal [heading]="selectedRoom.name" (dismissed)="selectedRoom = null">
+    @if (selectedRoom.imageUrl) {
+      <img class="room-cover" [src]="selectedRoom.imageUrl" [alt]="selectedRoom.name" />
+    }
     <p>{{ selectedRoom.description }}</p>
     <div class="chips">
       <span class="badge">{{ selectedRoom.capacityDisplay }}</span>

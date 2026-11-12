@@ -1,4 +1,5 @@
 import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { statusLabel } from '../status-label';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -24,6 +25,7 @@ const STALE_CLAIM_MS = 10 * 60 * 1000;
   templateUrl: './admin.html',
 })
 export class Admin {
+  readonly statusLabel = statusLabel;
   readonly store = inject(EventStore);
   readonly selectBooking = output<Booking>();
   readonly newBooking = output<void>();
