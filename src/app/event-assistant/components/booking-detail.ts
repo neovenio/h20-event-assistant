@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, computed, inject, input, output } from '@angular/core';
+import { statusLabel } from '../status-label';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { EventStore } from '../event-store';
@@ -10,6 +11,7 @@ import { Modal } from './modal';
   templateUrl: './booking-detail.html',
 })
 export class BookingDetail {
+  readonly statusLabel = statusLabel;
   readonly store = inject(EventStore);
   private readonly cdr = inject(ChangeDetectorRef);
   readonly value = input.required<Booking>();

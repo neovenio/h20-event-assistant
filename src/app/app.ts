@@ -1,4 +1,5 @@
 import { AuthService } from './event-assistant/auth-service';
+import { statusLabel } from './event-assistant/status-label';
 import {
   ChangeDetectorRef,
   Component,
@@ -58,6 +59,7 @@ interface BuilderHandle {
   styleUrl: './app.css',
 })
 export class App implements OnDestroy {
+  readonly statusLabel = statusLabel;
   readonly auth = inject(AuthService);
   authEmail = '';
   authPassword = '';
@@ -368,6 +370,9 @@ export class App implements OnDestroy {
     this.detachAdmin();
   }
   logout(): void {
+    // The previous user's request notice holds a private link: never leave it on screen.
+    this.notice = '';
+    this.receipt = '';
     void this.auth.logout();
     this.store.logout();
     this.auth.demoStaff.set(false);

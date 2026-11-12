@@ -89,7 +89,7 @@
               <td>{{ b.financial.totalPrice | currency: 'EUR' }}</td>
               <td>
                 <span class="status-pill">{{
-                  b.requestStatus || b.reservation.bookingStatus
+                  statusLabel(b.requestStatus || b.reservation.bookingStatus)
                 }}</span>
                 @if (b.aiStatus === 'failed') {
                   <span class="status-pill" data-indicator="ai-missing">AI-uitleg ontbreekt</span>
@@ -277,12 +277,18 @@
     <div class="card-grid">
       @for (room of store.rooms(); track room.id) {
         <article class="card">
-          <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+          @if (room.imageUrl) {
+            <img [src]="room.imageUrl" [alt]="room.name" loading="lazy" />
+          }
           <div class="card-body">
             <span class="badge">{{ room.isActive ? 'Actief' : 'Inactief' }}</span>
             <h3>{{ room.name }}</h3>
             <p>{{ room.capacityDisplay }}</p>
-            <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur</p>
+            @if (typeof room.baseHourlyRate === 'number') {
+              <p>{{ room.baseHourlyRate | currency: 'EUR' }} / uur</p>
+            } @else {
+              <p>Tarief op aanvraag</p>
+            }
             <button (click)="openRoom(room)">Zaal bewerken</button>
           </div>
         </article>
