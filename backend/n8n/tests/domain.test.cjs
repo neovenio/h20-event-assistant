@@ -218,6 +218,24 @@ test('editing an approved proposal sends it back for review', () => {
   assert.equal(result.response.booking.requestStatus, 'pending_review');
   assert.equal(result.response.booking.reservation.adminApprovalStatus, 'Pending');
 });
+test('cancelling records the request as cancelled, rejecting as rejected', () => {
+  for (const [actionType, expected] of [
+    ['cancel', 'cancelled'],
+    ['reject', 'rejected'],
+  ]) {
+    const s = savedRequest();
+    const out = domain.adminAction(
+      { action: 'booking-status', id: s.body.requestId, actionType },
+      s.rows,
+    );
+    assert.equal(out.response.booking.requestStatus, expected);
+    assert.equal(out.response.booking.reservation.bookingStatus, 'Cancelled');
+    assert.equal(
+      out.response.booking.reservation.adminApprovalStatus,
+      actionType === 'reject' ? 'Rejected' : 'Pending',
+    );
+  }
+});
 test('a staff review cannot reopen a cancelled or refunded request', () => {
   for (const status of ['Cancelled', 'Refunded']) {
     const s = savedRequest();
