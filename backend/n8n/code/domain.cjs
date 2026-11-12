@@ -122,46 +122,6 @@ function resolveClientKeys(body) {
   if (ip) keys.push(hashClientKey(ip));
   return keys.length ? [...new Set(keys)] : [hashClientKey('anonymous')];
 }
-function checkRateLimit(rows, action, clientKeys, nowMs = Date.now()) {
-  const limit = RATE_LIMITS[action];
-  if (!limit) fail('Onbekende actie.', 404);
-  const hashedKeys = [
-    ...new Set(
-      (Array.isArray(clientKeys) ? clientKeys : [clientKeys]).map((key) =>
-        hashClientKey(text(key, 200) || 'anonymous'),
-      ),
-    ),
-  ];
-  const recordId = `ratelimit:${action}`;
-  const existing = array(rows).find(
-    (item) => item.kind === 'ratelimit' && item.recordId === recordId,
-  );
-  let stored = existing?.data;
-  if (!stored && typeof existing?.payload === 'string') {
-    try {
-      stored = JSON.parse(existing.payload)?.data;
-    } catch {
-      stored = null;
-    }
-  }
-  const cutoff = nowMs - limit.windowMs;
-  const activeGlobal = array(stored?.global).filter((ts) => Number.isFinite(ts) && ts > cutoff);
-  const rawClients = stored?.clients && typeof stored.clients === 'object' ? stored.clients : {};
-  const clients = {};
-  for (const [key, stamps] of Object.entries(rawClients)) {
-    const active = array(stamps).filter((ts) => Number.isFinite(ts) && ts > cutoff);
-    if (active.length) clients[key] = active;
-  }
-  if (
-    hashedKeys.some((key) => (clients[key] ?? []).length >= limit.perClient) ||
-    activeGlobal.length >= limit.global
-  )
-    fail('Te veel verzoeken. Probeer het over enkele minuten opnieuw.', 429);
-  const nextGlobal = [...activeGlobal, nowMs];
-  const nextClients = { ...clients };
-  for (const key of hashedKeys) nextClients[key] = [...(clients[key] ?? []), nowMs];
-  return row('ratelimit', action, { global: nextGlobal, clients: nextClients });
-}
 function fail(message, status = 400) {
   const error = new Error(message);
   error.status = status;
@@ -343,6 +303,65 @@ function dedupe(rows) {
     if (!current || rivalRank(item.rowId) < rivalRank(current.rowId)) best.set(item.recordId, item);
   }
   return rows.filter((item) => best.get(item.recordId) === item);
+}
+const RATE_HIT_PRUNE_MAX = 50;
+const RATE_LIMIT_MESSAGE = 'Te veel verzoeken. Probeer het over enkele minuten opnieuw.';
+/** Random suffix for a hit's recordId. Ranking uses row ids, so uniqueness is not load-bearing. */
+const newHitId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+/**
+ * One rate hit per limited request: inserted first, counted after. Only hashed keys are stored.
+ * The id comes from the caller so the builder stays pure.
+ */
+function buildRateHit(action, keys, nowMs, id) {
+  const hashed = [
+    ...new Set(
+      (Array.isArray(keys) ? keys : [keys]).map((key) =>
+        hashClientKey(text(key, 200) || 'anonymous'),
+      ),
+    ),
+  ];
+  return row('ratehit', `${action}:${id}`, { action, keys: hashed, at: nowMs });
+}
+/**
+ * Insert-first rate limiting, same protocol as the slot claims (ADR 0007). `rows` is a fresh parsed
+ * read that contains our own hit. Our hit is allowed when, for each of its keys, fewer than
+ * `perClient` live hits sharing that key rank before it, and fewer than `global` live hits rank
+ * before it. Rank is the Data Table row id (lowest first); a rival without a usable id ranks first
+ * and our own hit without one is denied. Raw rows are counted, never deduped. Pure and order
+ * independent. `deleteRowIds` holds our own id when denied, plus up to 50 expired hit ids.
+ */
+function decideRateHit(rows, action, ownRowId, nowMs = Date.now()) {
+  const limit = RATE_LIMITS[action];
+  if (!limit) fail('Onbekende actie.', 404);
+  const cutoff = nowMs - limit.windowMs;
+  const expired = [];
+  const live = [];
+  for (const item of array(rows)) {
+    if (item?.kind !== 'ratehit' || item.data?.action !== action) continue;
+    const at = Number(item.data.at);
+    if (!Number.isFinite(at)) continue;
+    if (at > cutoff) live.push(item);
+    else if (validId(item.rowId)) expired.push(Number(item.rowId));
+  }
+  const prune = [...new Set(expired)].sort((a, b) => a - b).slice(0, RATE_HIT_PRUNE_MAX);
+  if (!validId(ownRowId)) return { allowed: false, deleteRowIds: prune };
+  const own = Number(ownRowId);
+  const mine = live.find((item) => validId(item.rowId) && Number(item.rowId) === own);
+  if (!mine) return { allowed: false, deleteRowIds: [own, ...prune] };
+  const earlier = live.filter((item) => item !== mine && rivalRank(item.rowId) < own);
+  const keysOf = (item) => array(item.data.keys);
+  const allowed =
+    earlier.length < limit.global &&
+    keysOf(mine).every(
+      (key) => earlier.filter((item) => keysOf(item).includes(key)).length < limit.perClient,
+    );
+  return { allowed, deleteRowIds: allowed ? prune : [own, ...prune] };
+}
+/** Id of our own row: as returned by the insert, else the single row with that recordId. */
+function ownIdOf(rows, recordId, id) {
+  if (validId(id)) return Number(id);
+  const same = rows.filter((r) => r.recordId === recordId);
+  return same.length === 1 && validId(same[0].rowId) ? Number(same[0].rowId) : null;
 }
 function hasConflict(rows, ids, date, start, end, except = '') {
   return (
@@ -656,11 +675,10 @@ function recommendConfiguration(body, rows) {
     customerNotes: '',
   };
 }
-function requestContext(body, rows, validated, booking, route, rateLimitWrite, clientKeys, nowMs) {
+function requestContext(body, rows, validated, booking, route, hitRow, nowMs) {
   return {
     route,
-    rateLimitWrite,
-    clientKeys,
+    hitRow,
     nowMs,
     status: 201,
     claimKind: 'booking',
@@ -684,11 +702,11 @@ function requestContext(body, rows, validated, booking, route, rateLimitWrite, c
     ),
   };
 }
-function lostClaim(rowId, kind = 'booking') {
+function lostClaim(rowId, kind = 'booking', alsoDelete = []) {
   return {
     route: 'lost',
     status: 409,
-    deleteRowId: Number(rowId),
+    deleteRowIds: [Number(rowId), ...alsoDelete],
     response: {
       error:
         kind === 'appointment'
@@ -698,26 +716,17 @@ function lostClaim(rowId, kind = 'booking') {
   };
 }
 /** A retry that finds its own claim still 'claiming' verifies again instead of trusting it. */
-function reverifyRequest(body, rows, existing, nowMs = Date.now()) {
+function reverifyRequest(body, rows, existing, nowMs = Date.now(), hitId = newHitId()) {
   const claim = claimShape(existing);
   if (!validId(existing.rowId))
     fail('De reservering kon niet worden bevestigd. Probeer opnieuw.', 503);
   if (!resolveClaim(rows, claim).won) return lostClaim(existing.rowId);
-  const clientKeys = resolveClientKeys(body);
-  const rateLimitWrite = checkRateLimit(dedupe(rows), 'event-request', clientKeys, nowMs);
   // Own and rival claims are excluded: the conflict check already ran when the claim was inserted.
   const catalogueRows = rows.filter((r) => r.kind !== 'booking' && r.kind !== 'block');
   const validated = validateRequest(body, catalogueRows);
-  return requestContext(
-    body,
-    catalogueRows,
-    validated,
-    existing.data,
-    'gemini',
-    rateLimitWrite,
-    clientKeys,
-    nowMs,
-  );
+  // This retry counts as a new hit (decided by `decideHit` before Gemini).
+  const hitRow = buildRateHit('event-request', resolveClientKeys(body), nowMs, hitId);
+  return requestContext(body, catalogueRows, validated, existing.data, 'hit', hitRow, nowMs);
 }
 function reverifyAppointment(rows, existing) {
   if (!validId(existing.rowId))
@@ -740,13 +749,17 @@ function reverifyAppointment(rows, existing) {
  * `ownRowId` is the system id returned by our own insert (never rediscovered by recordId, which a
  * double submit can duplicate).
  */
-function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now()) {
+function settleClaim(context, rows, ownRowId, ownHitRowId, nowMs = context.nowMs ?? Date.now()) {
+  // Our hit's id for deleting, only when it is unambiguous: otherwise we could delete a rival's row.
+  const hitId = context.hitRow ? ownIdOf(rows, context.hitRow.recordId, ownHitRowId) : null;
+  const withHit = (ids) => (hitId === null ? ids : [...ids, hitId]);
   if (!validId(ownRowId)) {
     // Fail closed. Only delete when the row is unambiguous, otherwise we could remove a rival.
-    const same = rows.filter((r) => r.recordId === context.claimRow.recordId);
+    const claimId = ownIdOf(rows, context.claimRow.recordId);
     const error = { error: 'De reservering kon niet worden bevestigd. Probeer opnieuw.' };
-    return same.length === 1 && validId(same[0].rowId)
-      ? { route: 'lost', status: 503, deleteRowId: Number(same[0].rowId), response: error }
+    const ids = withHit(claimId === null ? [] : [claimId]);
+    return ids.length
+      ? { route: 'lost', status: 503, deleteRowIds: ids, response: error }
       : { route: 'respond', status: 503, response: error };
   }
   const data = JSON.parse(context.claimRow.payload).data;
@@ -756,7 +769,7 @@ function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now(
     (context.claimKind === 'appointment' &&
       hasAppointmentClosure(rows, data.date, data.startTime, data.endTime))
   )
-    return lostClaim(ownRowId, context.claimKind);
+    return lostClaim(ownRowId, context.claimKind, withHit([]));
   if (context.claimKind === 'block' || context.claimKind === 'appointment') {
     const parsed = JSON.parse(context.claimRow.payload);
     const held = { ...parsed, data: { ...parsed.data, claimStatus: 'held' } };
@@ -766,25 +779,50 @@ function settleClaim(context, rows, ownRowId, nowMs = context.nowMs ?? Date.now(
       context.status,
     );
   }
-  let rateLimitWrite;
-  try {
-    rateLimitWrite = checkRateLimit(
-      dedupe(rows),
-      'event-request',
-      context.clientKeys ?? 'anonymous',
-      nowMs,
-    );
-  } catch (error) {
+  // A booking needs its own hit; without a usable id fail closed and drop the claim.
+  if (!context.hitRow || !validId(ownHitRowId))
     return {
       route: 'lost',
-      status: error.status ?? 429,
-      deleteRowId: Number(ownRowId),
-      response: { error: error.message },
+      status: 503,
+      deleteRowIds: withHit([Number(ownRowId)]),
+      response: { error: 'De reservering kon niet worden bevestigd. Probeer opnieuw.' },
     };
-  }
-  return { ...context, rateLimitWrite, route: 'gemini' };
+  const decision = decideRateHit(rows, 'event-request', ownHitRowId, nowMs);
+  if (!decision.allowed)
+    return {
+      route: 'lost',
+      status: 429,
+      deleteRowIds: [Number(ownRowId), ...decision.deleteRowIds],
+      response: { error: RATE_LIMIT_MESSAGE },
+    };
+  return { ...context, route: 'gemini', pruneRowIds: decision.deleteRowIds };
 }
-function publicAction(body, allRows, nowMs = Date.now()) {
+/**
+ * Decision step for requests that insert only a hit (chat, and a `claiming` retry): `rows` is a fresh
+ * read that includes our hit, `ownHitRowId` the id from our own insert. Allowed -> Gemini (with the
+ * expired ids to prune); denied -> delete our hit and answer 429; no usable id -> 503, never Gemini.
+ */
+function decideHit(context, rows, ownHitRowId, nowMs = context.nowMs ?? Date.now()) {
+  if (!validId(ownHitRowId)) {
+    // Fail closed; remove our row only when it is unambiguous.
+    const hitId = ownIdOf(rows, context.hitRow.recordId);
+    const error = { error: 'Het verzoek kon niet worden bevestigd. Probeer opnieuw.' };
+    return hitId === null
+      ? { route: 'respond', status: 503, response: error }
+      : { route: 'lost', status: 503, deleteRowIds: [hitId], response: error };
+  }
+  const action = JSON.parse(context.hitRow.payload).data.action;
+  const decision = decideRateHit(rows, action, ownHitRowId, nowMs);
+  if (!decision.allowed)
+    return {
+      route: 'lost',
+      status: 429,
+      deleteRowIds: decision.deleteRowIds,
+      response: { error: RATE_LIMIT_MESSAGE },
+    };
+  return { ...context, route: 'gemini', pruneRowIds: decision.deleteRowIds };
+}
+function publicAction(body, allRows, nowMs = Date.now(), hitId = newHitId()) {
   const rows = dedupe(allRows);
   if (body.action === 'my-requests') {
     if (!body._identity?.uid) fail('Log eerst in.', 401);
@@ -869,34 +907,25 @@ function publicAction(body, allRows, nowMs = Date.now()) {
       if (existing.ownerUid !== body._identity.uid) fail('Ongeldige aanvraagreferentie.', 409);
       if (existing.customerToken !== body.customerToken) fail('Ongeldige aanvraagreferentie.', 409);
       if (claimStatusOf(existing.data) === 'claiming' && isActiveBooking(existing.data))
-        return reverifyRequest(body, allRows, existing, nowMs);
+        return reverifyRequest(body, allRows, existing, nowMs, hitId);
       return response({ booking: publicBooking(existing.data) });
     }
-    const clientKeys = resolveClientKeys(body);
-    const rateLimitWrite = checkRateLimit(rows, 'event-request', clientKeys, nowMs);
+    // Validate first so an invalid request creates no hit row.
     const validated = validateRequest(body, rows);
     const booking = { ...buildBooking(body, validated), claimStatus: 'claiming' };
-    return requestContext(
-      body,
-      rows,
-      validated,
-      booking,
-      'claim',
-      rateLimitWrite,
-      clientKeys,
-      nowMs,
-    );
+    const hitRow = buildRateHit('event-request', resolveClientKeys(body), nowMs, hitId);
+    return requestContext(body, rows, validated, booking, 'claim', hitRow, nowMs);
   }
   if (body.action === 'chat') {
     if (!body._identity?.uid) fail('Log eerst in om de AI-assistent te gebruiken.', 401);
-    const rateLimitWrite = checkRateLimit(rows, 'chat', resolveClientKeys(body), nowMs);
     const message = text(body.message, 2000);
     if (!message) fail('Vul een bericht in.');
     const recommendation = recommendConfiguration(body, rows);
     return {
-      route: 'gemini',
+      route: 'hit',
       chat: true,
-      rateLimitWrite,
+      nowMs,
+      hitRow: buildRateHit('chat', resolveClientKeys(body), nowMs, hitId),
       config: recommendation,
       status: 200,
       geminiBody: geminiBody(
@@ -1225,7 +1254,9 @@ function adminAction(body, allRows) {
 if (typeof module !== 'undefined')
   module.exports = {
     RATE_LIMITS,
-    checkRateLimit,
+    buildRateHit,
+    decideRateHit,
+    decideHit,
     hashClientKey,
     sha256,
     parseRows,
